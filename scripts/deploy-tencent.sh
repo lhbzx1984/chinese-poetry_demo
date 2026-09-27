@@ -76,6 +76,9 @@ else
     $SUDO ln -sf /usr/local/node24/bin/node /usr/local/bin/node
     $SUDO ln -sf /usr/local/node24/bin/npm  /usr/local/bin/npm
     $SUDO ln -sf /usr/local/node24/bin/npx  /usr/local/bin/npx
+    # 强制本脚本后续使用刚安装的 Node 24（防止服务器预装的旧版 node 抢占 PATH）
+    export PATH="/usr/local/node24/bin:$PATH"
+    hash -r
     rm -f "$NODE_TAR"
   else
     log "镜像下载失败，改用 NodeSource 源…"
@@ -88,10 +91,13 @@ else
   fi
   if ! node_ok; then
     log "安装失败，诊断信息："
-    echo "  架构: $(uname -m) | PATH: $PATH"
+    echo "  架构: $(uname -m)"
+    echo "  PATH: $PATH"
+    echo "  node 路径: $(command -v node || echo 未找到) → $(readlink -f "$(command -v node)" 2>/dev/null || echo '')"
+    echo "  node 版本: $(node -v 2>&1 | head -1)"
+    echo "  已安装的 Node24 二进制: $(/usr/local/node24/bin/node -v 2>&1 | head -1)"
     ls -l /usr/local/bin/node /usr/local/node24/bin/node 2>&1 | sed 's/^/  /'
-    echo "  node -v 执行结果: $(node -v 2>&1 | head -1)"
-    fail "Node 24 安装后仍不可用"
+    fail "Node 24 安装后仍不可用（把以上诊断信息发给开发者）"
   fi
   log "Node $(node -v) 就绪"
 fi
