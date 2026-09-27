@@ -28,6 +28,9 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# 本地诗词数据集、构建出的数据库与生成的配图缓存
+/data/
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
