@@ -121,7 +121,11 @@ else
 fi
 cd "$APP_DIR"
 
-# ---------- 4. 数据集（chinese-poetry，约 95MB）+ 诗词数据库 ----------
+# ---------- 4. 依赖安装（build:db 需要 opencc-js） ----------
+log "安装依赖（npmmirror 源）…"
+npm ci --registry="$NPM_REGISTRY" 2>/dev/null || npm install --registry="$NPM_REGISTRY"
+
+# ---------- 5. 数据集（chinese-poetry，约 95MB）+ 诗词数据库 ----------
 if [ ! -d data/chinese-poetry/json ] && [ ! -d data/chinese-poetry/全唐诗 ]; then
   mkdir -p data
   log "下载 chinese-poetry 数据集（约 95MB，视带宽 1-5 分钟）…"
@@ -139,11 +143,7 @@ else
   log "诗词数据库已存在，跳过构建"
 fi
 
-# ---------- 5. 依赖安装 ----------
-log "安装依赖（npmmirror 源）…"
-npm ci --registry="$NPM_REGISTRY" 2>/dev/null || npm install --registry="$NPM_REGISTRY"
-
-# ---------- 6. 环境变量（AI 能力） ----------
+# ---------- 7. 环境变量（AI 能力） ----------
 if [ ! -f .env.local ]; then
   printf '%s\n' "AGNES_API_KEY=${AGNES_API_KEY:-}" "AI_API_BASE_URL=https://apihub.agnes-ai.com/v1" "IMAGE_MODEL=agnes-image-2.5-flash" "IMAGE_SIZE=1344x768" "TEXT_MODEL=agnes-3.0-flash" "VIDEO_MODEL=agnes-video-2.5-flash" > .env.local
   [ -n "${AGNES_API_KEY:-}" ] && log ".env.local 已写入 AGNES_API_KEY" || log "未提供 AGNES_API_KEY：AI 配图/短片暂不可用，稍后编辑 ${APP_DIR}/.env.local 填入后 pm2 restart shijing"
@@ -151,7 +151,7 @@ else
   log ".env.local 已存在，保留原有配置"
 fi
 
-# ---------- 7. 生产构建 ----------
+# ---------- 6. 生产构建 ----------
 log "生产构建（约 1-3 分钟）…"
 NEXT_TELEMETRY_DISABLED=1 npm run build || fail "构建失败"
 
