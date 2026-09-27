@@ -56,25 +56,31 @@ node_ok() { command -v node >/dev/null && [ "$(node -p 'parseInt(process.version
 if node_ok; then
   log "Node $(node -v) 已满足，跳过安装"
 else
-  log "安装 Node.js 24…"
-  NODE_VER=$(curl -fsSL "https://registry.npmmirror.com/-/binary/node/latest-v24.x/" | grep -oP 'node-v24\.[0-9.]+-linux-x64\.tar\.xz' | head -1 || true)
-  if [ -n "${NODE_VER:-}" ]; then
-    curl -fsSL --retry 3 -o /tmp/node.tar.xz "https://registry.npmmirror.com/-/binary/node/latest-v24.x/${NODE_VER}"
+  log "安装 Node.js 24（国内镜像）…"
+  NODE_VER=""
+  NODE_TAR=""
+  for MIRROR in "https://mirrors.cloud.tencent.com/nodejs-release" "https://registry.npmmirror.com/-/binary/node"; do
+    SHASUMS=$(curl -fsSL --max-time 20 "$MIRROR/latest-v24.x/SHASUMS256.txt" 2>/dev/null) || continue
+    NODE_VER=$(echo "$SHASUMS" | grep -oP 'node-v24\.\d+\.\d+-linux-x64\.tar\.xz' | head -1)
+    [ -n "$NODE_VER" ] && { curl -fsSL --retry 3 -o /tmp/node.tar.xz "$MIRROR/latest-v24.x/$NODE_VER" && NODE_TAR=/tmp/node.tar.xz && break; }
+  done
+  if [ -n "$NODE_TAR" ] && [ -s "$NODE_TAR" ]; then
     $SUDO mkdir -p /usr/local/node24
-    $SUDO tar -xJf /tmp/node.tar.xz -C /usr/local/node24 --strip-components=1
+    $SUDO tar -xJf "$NODE_TAR" -C /usr/local/node24 --strip-components=1
     $SUDO ln -sf /usr/local/node24/bin/node /usr/local/bin/node
     $SUDO ln -sf /usr/local/node24/bin/npm  /usr/local/bin/npm
     $SUDO ln -sf /usr/local/node24/bin/npx  /usr/local/bin/npx
-    rm -f /tmp/node.tar.xz
+    rm -f "$NODE_TAR"
   else
+    log "镜像下载失败，改用 NodeSource 源…"
     if command -v apt-get >/dev/null; then
-      curl -fsSL https://deb.nodesource.com/setup_24.x | $SUDO bash -
-      $SUDO apt-get install -y -qq nodejs
+      curl -fsSL https://deb.nodesource.com/setup_24.x | $SUDO bash -         || fail "NodeSource 源不可用"
+      $SUDO apt-get install -y nodejs
     else
       fail "Node 安装失败，请手动安装 Node.js 24"
     fi
   fi
-  node_ok || fail "Node 24 安装后仍不可用"
+  node_ok || { node -v 2>/dev/null | head -1; fail "Node 24 安装后仍不可用（可手动从 mirrors.cloud.tencent.com/nodejs-release 下载安装）"; }
   log "Node $(node -v) 就绪"
 fi
 
