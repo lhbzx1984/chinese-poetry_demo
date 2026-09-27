@@ -105,6 +105,16 @@ npm start            # 局域网访问加 -H 0.0.0.0
 - **公网部署**：项目无登录鉴权，公网开放请在 Nginx 加 Basic Auth，避免 AI 额度被滥用；Nginx 需 `client_max_body_size 100m`（影片上传）
 - Serverless 平台（Vercel 等）不适用：依赖本地 SQLite 大文件与磁盘写入
 
+### 腾讯云一键部署
+
+在腾讯云服务器（Ubuntu/Debian/TencentOS/CentOS，root 或 sudo）上执行：
+
+```bash
+curl -fsSL -o deploy.sh "https://ghproxy.net/https://raw.githubusercontent.com/lhbzx1984/chinese-poetry_demo/main/scripts/deploy-tencent.sh" && bash deploy.sh
+```
+
+脚本自动完成：Node 24 安装（npmmirror 二进制）→ 代码获取（GitHub 失败自动走国内镜像）→ 数据集下载与数据库构建 → 依赖安装与生产构建 → pm2 守护与开机自启。可先 `export AGNES_API_KEY=sk-xxx` 启用 AI 能力，或部署后编辑 `/opt/shijing/.env.local` 再 `pm2 restart shijing`。完成后需在腾讯云控制台【安全组】放行 3000 端口。
+
 ### 部署到 Cloudflare
 
 **方式 A：Cloudflare Tunnel（推荐，代码零改动）**——在跑项目的机器上安装 `cloudflared`，把 localhost:3000 发布为你的域名：
