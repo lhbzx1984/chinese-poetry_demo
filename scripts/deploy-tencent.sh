@@ -123,6 +123,7 @@ cd "$APP_DIR"
 
 # ---------- 4. 数据集（chinese-poetry，约 95MB）+ 诗词数据库 ----------
 if [ ! -d data/chinese-poetry/json ] && [ ! -d data/chinese-poetry/全唐诗 ]; then
+  mkdir -p data
   log "下载 chinese-poetry 数据集（约 95MB，视带宽 1-5 分钟）…"
   curl -fsSL --retry 5 -o data/cp.zip "$DATASET_ZIP" || fail "数据集下载失败，可手动重试"
   unzip -qo data/cp.zip -d data
