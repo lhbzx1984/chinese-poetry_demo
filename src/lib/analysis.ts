@@ -26,7 +26,12 @@ export type PoemAnalysis = { scenes: SceneAnalysis[] };
 
 export function readAnalysis(poem: Poem): PoemAnalysis | null {
   try {
-    return JSON.parse(fs.readFileSync(analysisFile(poem), "utf8")) as PoemAnalysis;
+    const parsed = JSON.parse(fs.readFileSync(analysisFile(poem), "utf8")) as PoemAnalysis & { failedAt?: number };
+    // 失败占位（空结果）超过 10 分钟视为过期：允许重新尝试合成
+    if (parsed.scenes.length === 0 && parsed.failedAt && Date.now() - parsed.failedAt > 10 * 60 * 1000) {
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
