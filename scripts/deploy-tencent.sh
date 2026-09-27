@@ -123,7 +123,22 @@ cd "$APP_DIR"
 
 # ---------- 4. 依赖安装（build:db 需要 opencc-js） ----------
 log "安装依赖（npmmirror 源）…"
-npm ci --registry="$NPM_REGISTRY" 2>/dev/null || npm install --registry="$NPM_REGISTRY"
+dep_ok=0
+for attempt in 1 2 3; do
+  if [ "$attempt" -eq 2 ]; then
+    log "首次安装失败：清理 node_modules 与 npm 缓存后重试…"
+    rm -rf node_modules package-lock.json
+    npm cache clean --force 2>/dev/null
+  fi
+  if [ "$attempt" -eq 3 ]; then
+    log "二次失败：改用官方 npm 源重试…"
+    npm install --no-audit --no-fund --registry="https://registry.npmjs.org" && dep_ok=1 && break
+    rm -rf node_modules package-lock.json
+  fi
+  npm install --no-audit --no-fund --registry="$NPM_REGISTRY" && dep_ok=1 && break
+done
+[ "$dep_ok" -eq 1 ] || { echo "  npm 版本: $(npm -v), node 版本: $(node -v)"; echo "  完整日志: /root/.npm/_logs/ 最新一个文件"; fail "依赖安装失败（把上面日志与 npm 日志尾部发给开发者）"; }
+log "依赖安装完成"
 
 # ---------- 5. 数据集（chinese-poetry，约 95MB）+ 诗词数据库 ----------
 if [ ! -d data/chinese-poetry/json ] && [ ! -d data/chinese-poetry/全唐诗 ]; then
