@@ -173,6 +173,8 @@ NEXT_TELEMETRY_DISABLED=1 npm run build || fail "构建失败"
 # ---------- 8. pm2 守护 ----------
 if ! command -v pm2 >/dev/null; then
   npm i -g pm2 --registry="$NPM_REGISTRY"
+  # pm2 装在 node24 的全局目录，链接进系统路径
+  ln -sf /usr/local/node24/bin/pm2 /usr/local/bin/pm2 2>/dev/null || true
 fi
 pm2 delete shijing >/dev/null 2>&1 || true
 NEXT_TELEMETRY_DISABLED=1 PORT="$PORT" pm2 start npm --name shijing -- start
