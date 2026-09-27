@@ -57,11 +57,17 @@ if node_ok; then
   log "Node $(node -v) 已满足，跳过安装"
 else
   log "安装 Node.js 24（国内镜像）…"
+  case "$(uname -m)" in
+    x86_64)  NODE_ARCH="linux-x64" ;;
+    aarch64|arm64) NODE_ARCH="linux-arm64" ;;
+    *) fail "不支持的 CPU 架构：$(uname -m)" ;;
+  esac
+  log "CPU 架构：$(uname -m) → 将下载 $NODE_ARCH 版本"
   NODE_VER=""
   NODE_TAR=""
   for MIRROR in "https://mirrors.cloud.tencent.com/nodejs-release" "https://registry.npmmirror.com/-/binary/node"; do
     SHASUMS=$(curl -fsSL --max-time 20 "$MIRROR/latest-v24.x/SHASUMS256.txt" 2>/dev/null) || continue
-    NODE_VER=$(echo "$SHASUMS" | grep -oP 'node-v24\.\d+\.\d+-linux-x64\.tar\.xz' | head -1)
+    NODE_VER=$(echo "$SHASUMS" | grep -oP "node-v24\.\d+\.\d+-$NODE_ARCH\.tar\.xz" | head -1)
     [ -n "$NODE_VER" ] && { curl -fsSL --retry 3 -o /tmp/node.tar.xz "$MIRROR/latest-v24.x/$NODE_VER" && NODE_TAR=/tmp/node.tar.xz && break; }
   done
   if [ -n "$NODE_TAR" ] && [ -s "$NODE_TAR" ]; then
@@ -80,7 +86,13 @@ else
       fail "Node 安装失败，请手动安装 Node.js 24"
     fi
   fi
-  node_ok || { node -v 2>/dev/null | head -1; fail "Node 24 安装后仍不可用（可手动从 mirrors.cloud.tencent.com/nodejs-release 下载安装）"; }
+  if ! node_ok; then
+    log "安装失败，诊断信息："
+    echo "  架构: $(uname -m) | PATH: $PATH"
+    ls -l /usr/local/bin/node /usr/local/node24/bin/node 2>&1 | sed 's/^/  /'
+    echo "  node -v 执行结果: $(node -v 2>&1 | head -1)"
+    fail "Node 24 安装后仍不可用"
+  fi
   log "Node $(node -v) 就绪"
 fi
 
