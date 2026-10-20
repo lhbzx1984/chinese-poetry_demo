@@ -24,7 +24,8 @@ const OUT = process.env.POETRY_DB_PATH || path.join(ROOT, "data", "poetry.db");
 if (!fs.existsSync(DATA_DIR)) {
   console.error(`找不到数据目录：${DATA_DIR}`);
   console.error(`请先把 chinese-poetry 数据集下载解压到 data/chinese-poetry，例如：`);
-  console.error(`  curl -L -o data/cp.zip "https://ghproxy.net/https://github.com/chinese-poetry/chinese-poetry/archive/refs/heads/master.zip"`);
+  console.error(`  mkdir -p data`);
+  console.error(`  curl -L -o data/cp.zip "https://github.com/chinese-poetry/chinese-poetry/archive/refs/heads/master.zip"`);
   console.error(`  unzip data/cp.zip -d data && mv data/chinese-poetry-master data/chinese-poetry`);
   process.exit(1);
 }

@@ -6,6 +6,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const p = new URL(request.url).searchParams;
+  for (const name of ['page', 'pageSize']) {
+    const value = p.get(name);
+    if (value !== null && (!Number.isSafeInteger(Number(value)) || Number(value) < 1)) {
+      return NextResponse.json({ error: '分页参数必须为正整数。' }, { status: 400 });
+    }
+  }
+  if ((p.get('q')?.length ?? 0) > 200) return NextResponse.json({ error: '搜索词请限制在 200 字以内。' }, { status: 400 });
   try {
     const result = listPoems({
       dynasty: p.get("dynasty") || undefined,
