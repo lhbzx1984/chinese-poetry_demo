@@ -132,8 +132,16 @@ export function AudioController({ children }: { children: ReactNode }) {
   const setEnabled = useCallback(
     (on: boolean) => {
       if (on) {
+        const entering = !current.current.enabled;
         void audioEngine.unlock().then((ctx) => {
-          if (ctx) setUnlocked(true);
+          if (ctx) {
+            setUnlocked(true);
+            if (entering && pathname === "/") {
+              audioEngine.setSfxVolume(current.current.sfxVolume);
+              synth("bell", { volume: 0.3 });
+              synth("ink", { volume: 0.3 });
+            }
+          }
         });
       } else {
         ambientMusic.stop(0.6);
@@ -141,13 +149,14 @@ export function AudioController({ children }: { children: ReactNode }) {
       }
       update({ enabled: on });
     },
-    [update],
+    [update, pathname],
   );
   const playSfx = useCallback<typeof synth>(
     (name, opts) => {
-      if (pathname === "/" && prefs.enabled && unlocked) synth(name, opts);
+      if (pathname === "/" && prefs.enabled && unlocked)
+        synth(name, { root: moodByName(prefs.mood)?.root, ...opts });
     },
-    [pathname, prefs.enabled, unlocked],
+    [pathname, prefs.enabled, prefs.mood, unlocked],
   );
   const setMood = useCallback(
     (mood: string) => {

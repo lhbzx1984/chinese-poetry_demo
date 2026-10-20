@@ -26,7 +26,6 @@ export default function EntryVeil() {
   const enter = useCallback(
     (sound: boolean) => {
       audio.setEnabled(sound);
-      audio.playSfx("ink");
       try {
         sessionStorage.setItem("shijing:veil-seen", "1");
       } catch {

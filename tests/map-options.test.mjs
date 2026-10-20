@@ -13,6 +13,8 @@ test("路线按原始足迹顺序，二维三维共享数据，标签限额，�
       poet.spots.map((s) => [s.lng, s.lat]),
     );
     assert.equal(series[0].effect.show, false);
+    assert.equal(series[2].showEffectOn, "emphasis");
+    assert.equal(series[2].data.length, poet.spots.length);
     assert.ok(series[1].data.filter((d) => d.label.show).length <= 30);
   }
   assert.equal(preferredMapMode(false, false, 16, false), "2d");

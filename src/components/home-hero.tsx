@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useAudio } from "./audio-controller";
+import { useAudio, useSfxProps } from "./audio-controller";
 import { Seal } from "./ui/seal";
 import { Icon } from "./ui/icons";
 const VERSES = [
@@ -36,6 +36,7 @@ export default function HomeHero({
 }: {
   videoAvailable?: boolean;
 }) {
+  const ctaSound = useSfxProps("knock");
   const router = useRouter(),
     audio = useAudio(),
     hero = useRef<HTMLElement>(null),
@@ -126,8 +127,15 @@ export default function HomeHero({
                   volume: 0.5,
                 });
             }}
-            onFocus={() => audio.playSfx("pluck", { note: i * 2, volume: 0.5 })}
-            onClick={() => audio.playSfx("pluck", { note: i * 2 })}
+            onFocus={() =>
+              audio.playSfx("pluck", {
+                note: [0, 2, 4, 7, 9, 12, 14][i],
+                volume: 0.5,
+              })
+            }
+            onClick={() =>
+              audio.playSfx("pluck", { note: [0, 2, 4, 7, 9, 12, 14][i] })
+            }
           >
             <span>{text}</span>
             <span className="verse-poet">{poet}</span>
@@ -151,6 +159,7 @@ export default function HomeHero({
         </p>
         <div className="cinema-cta">
           <a
+            {...ctaSound}
             className="cta primary"
             href="#map"
             onClick={() => audio.playSfx("knock")}
@@ -159,6 +168,7 @@ export default function HomeHero({
             步入山河
           </a>
           <Link
+            {...ctaSound}
             className="cta"
             href="/library"
             prefetch={false}
@@ -168,6 +178,7 @@ export default function HomeHero({
             漫游书库
           </Link>
           <button
+            {...ctaSound}
             className="cta"
             onClick={() => void randomEntry()}
             disabled={jumping}

@@ -105,5 +105,19 @@ export function mapSeries(
         itemStyle: { opacity: 1, color: "#f4ecd8" },
       },
     },
+    {
+      id: "poet-halo",
+      type: mode === "3d" ? "scatter3D" : reduced ? "scatter" : "effectScatter",
+      coordinateSystem: mode === "3d" ? "geo3D" : "geo",
+      silent: true,
+      data: points
+        .filter((p) => p.name === selected)
+        .map((p) => ({ value: p.value })),
+      symbolSize: mobile ? 28 : 24,
+      itemStyle: { color: "#b5342a", opacity: 0.18 },
+      rippleEffect: { period: 3, scale: 2.2, brushType: "stroke" },
+      showEffectOn: reduced ? "emphasis" : "render",
+      label: { show: false },
+    },
   ];
 }

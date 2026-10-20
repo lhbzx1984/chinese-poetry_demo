@@ -386,6 +386,7 @@ button:active,
   background: var(--ink-900);
 }
 .brand {
+  min-height: 44px;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -718,6 +719,7 @@ input[type="range"] {
   overflow: hidden;
 }
 .verse-column {
+  min-width: 44px;
   pointer-events: auto;
   writing-mode: vertical-rl;
   text-orientation: upright;
@@ -2025,7 +2027,7 @@ input[type="range"] {
   object-fit: cover;
   opacity: 0.6;
 }
-.video-poster > .icon {
+.video-poster > svg {
   position: relative;
 }
 .duration-badge {

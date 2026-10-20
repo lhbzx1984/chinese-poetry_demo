@@ -57,6 +57,7 @@ export default function MapExplorer() {
       if (!fromTour) {
         pause();
         audioRef.current.playSfx("bell", { volume: 0.5 });
+        audioRef.current.playSfx("paper", { volume: 0.3 });
         audioRef.current.playSfx("drop", { volume: 0.5 });
       } else audioRef.current.playSfx("pluck", { volume: 0.35 });
     },
@@ -365,6 +366,22 @@ export default function MapExplorer() {
     }
   }, [ready, mode, active, selected, spot, reduced, dynasty]);
   useEffect(() => {
+    if (!ready || !selected || mode !== "3d" || reduced) return;
+    // scatter3D 无 rippleEffect，用稀疏更新为选中足迹绘制呼吸光晕。
+    const timer = setInterval(() => {
+      if (document.hidden || !chart.current) return;
+      chart.current.setOption({
+        series: [
+          {
+            id: "poet-halo",
+            symbolSize: 26 + 5 * Math.sin(performance.now() / 480),
+          },
+        ],
+      } as EChartsOption);
+    }, 200);
+    return () => clearInterval(timer);
+  }, [ready, selected, mode, reduced]);
+  useEffect(() => {
     if (!ready || !tour || paused || reduced) return;
     const timer = setInterval(() => {
       const index = tourCursor.current % active.length;
@@ -385,16 +402,14 @@ export default function MapExplorer() {
       try {
         const found: PoemSummary[] = [];
         const queries = [
-          ...selected.famous
-            .slice(0, 4)
-            .map(
-              (q) =>
-                new URLSearchParams({
-                  author: selected.name,
-                  q,
-                  pageSize: "1",
-                }),
-            ),
+          ...selected.famous.slice(0, 4).map(
+            (q) =>
+              new URLSearchParams({
+                author: selected.name,
+                q,
+                pageSize: "1",
+              }),
+          ),
           new URLSearchParams({ author: selected.name, pageSize: "8" }),
         ];
         for (const params of queries) {
@@ -443,7 +458,11 @@ export default function MapExplorer() {
           <br />
           后来都成了诗。
         </h2>
-        <p>96位诗人，405处山河足迹。从故乡到远方，从一座城到另一段人生。</p>
+        <p>
+          {POET_PLACES.length}位诗人，
+          {POET_PLACES.reduce((sum, p) => sum + p.spots.length, 0)}
+          处山河足迹。从故乡到远方，从一座城到另一段人生。
+        </p>
         <div className="timeline" role="group" aria-label="按朝代筛选">
           <button
             className={`chip${!dynasty ? " active" : ""}`}

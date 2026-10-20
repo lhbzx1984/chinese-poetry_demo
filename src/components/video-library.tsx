@@ -24,6 +24,42 @@ function fmtSize(bytes: number) {
     : `${Math.round(bytes / 1024)} KB`;
 }
 
+function VideoPoster({ id, duration }: { id: string; duration: number }) {
+  const ref = useRef<HTMLSpanElement>(null),
+    [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <span className="video-poster" ref={ref}>
+      {visible && (
+        <video
+          preload="metadata"
+          muted
+          playsInline
+          aria-hidden="true"
+          tabIndex={-1}
+          src={`/api/videos/${id}#t=0.1`}
+        />
+      )}
+      <span className="duration-badge">{fmtDur(duration)}</span>
+      <Icon name="play" />
+    </span>
+  );
+}
+
 export default function VideoLibrary() {
   const [error, setError] = useState<string | null>(null);
   const [videos, setVideos] = useState<VideoMeta[] | null>(null);
@@ -143,18 +179,7 @@ export default function VideoLibrary() {
                   className={`video-card${active?.id === v.id ? " active" : ""}`}
                   onClick={() => setActive(v)}
                 >
-                  <span className="video-poster">
-                    <video
-                      preload="metadata"
-                      muted
-                      playsInline
-                      aria-hidden="true"
-                      tabIndex={-1}
-                      src={`/api/videos/${v.id}#t=0.1`}
-                    />
-                    <span className="duration-badge">{fmtDur(v.duration)}</span>
-                    <Icon name="play" />
-                  </span>
+                  <VideoPoster id={v.id} duration={v.duration} />
                   <span className="vc-title">《{v.title}》</span>
                   <span className="vc-author">
                     {v.author} · {fmtDur(v.duration)} · {fmtSize(v.bytes)}
