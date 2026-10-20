@@ -23,9 +23,9 @@ export function environmentById(id: SceneEnvironmentId): SceneEnvironment {
   return SCENE_ENVIRONMENTS.find((environment) => environment.id === id) ?? SCENE_ENVIRONMENTS[9];
 }
 
-export function matchSceneEnvironment(text: string, title = "", tags: readonly string[] = []): SceneEnvironment {
-  // 优先看这一幕的诗句；只有本幕没有景物线索时才借用诗名与题材。
-  for (const source of [text, `${title} ${tags.join(" ")}`]) {
+export function matchSceneEnvironment(text: string, title = "", tags: readonly string[] = [], poemContext = ""): SceneEnvironment {
+  // 优先看这一幕的诗句；本幕没有景物线索时再借用诗名、题材与全诗语境。
+  for (const source of [text, `${title} ${tags.join(" ")}`, poemContext]) {
     let best: SceneEnvironment = SCENE_ENVIRONMENTS[9];
     let bestScore = 0;
     for (const environment of SCENE_ENVIRONMENTS) {

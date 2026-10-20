@@ -74,7 +74,7 @@ export default function VideoLibrary() {
       <section className="video-hero">
         <h1>影片馆</h1>
         <p>
-          沉浸页里分镜图就绪后点「🎬 生成短片」，诗词朗读、意境配乐与画面合成的短片会保存在这里，随时回看与下载。
+          在沉浸页点「🎬 生成短片」，当前逐幕画面、诗词朗读与意境配乐会合成短片，保存在这里供回看与下载。
         </p>
       </section>
 
@@ -87,7 +87,7 @@ export default function VideoLibrary() {
             还没有影片。
             <br />
             <small>
-              去 <Link href="/">首页</Link> 选一首诗进入沉浸页，分镜画面就绪后点「🎬 生成短片」即可创作第一部。
+              去 <Link href="/">首页</Link> 选一首诗进入沉浸页，点「🎬 生成短片」即可创作第一部。
             </small>
           </div>
         ) : (

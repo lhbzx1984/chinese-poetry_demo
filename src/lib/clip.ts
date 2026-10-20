@@ -35,7 +35,7 @@ export type ClipOptions = {
   exp: ExperienceData;
   musicStream: MediaStream | null; // 意境配乐的实时流（可空）
   narrations: NarrationClip[];
-  images: HTMLImageElement[];
+  images: string[]; // 与分镜一一对应：当前选择的 AI 配图或匹配场景
 };
 
 // 各幕时长：有旁白取旁白时长 + 余量，无旁白用最小值
@@ -49,19 +49,20 @@ function sceneDurations(count: number, narrations: { sceneIndex: number; buffer:
 }
 
 export async function generatePoemClip(opts: ClipOptions): Promise<{ blob: Blob; total: number }> {
+  if (opts.images.length !== opts.exp.scenes.length || opts.images.length === 0) {
+    throw new Error("每一幕都需要对应的画面");
+  }
   const imgs: HTMLImageElement[] = [];
-  for (const im of opts.exp.images) {
-    if (im.status !== "ready" || !im.url) continue;
+  for (const source of opts.images) {
     const img = new Image();
-    img.src = im.url;
+    img.src = source;
     await img.decode();
     imgs.push(img);
   }
-  if (!imgs.length) throw new Error("还没有可用的分镜图");
   return generatePoemClipInner({ ...opts, images: imgs });
 }
 
-async function generatePoemClipInner(opts: ClipOptions): Promise<{ blob: Blob; total: number }> {
+async function generatePoemClipInner(opts: Omit<ClipOptions, "images"> & { images: HTMLImageElement[] }): Promise<{ blob: Blob; total: number }> {
   const { exp, musicStream, narrations, images } = opts;
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -93,9 +94,9 @@ async function generatePoemClipInner(opts: ClipOptions): Promise<{ blob: Blob; t
 
   const total = titleSec + durations.reduce((a, b) => a + b, 0);
 
-  const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-    ? "video/webm;codecs=vp9,opus"
-    : "video/webm";
+  const mime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+    .find((candidate) => MediaRecorder.isTypeSupported(candidate));
+  if (!mime) throw new Error("当前浏览器不支持 WebM 录制，请使用 Chrome / Edge。");
   const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 5_000_000 });
   const chunks: Blob[] = [];
   rec.ondataavailable = (e) => {
@@ -197,5 +198,10 @@ async function generatePoemClipInner(opts: ClipOptions): Promise<{ blob: Blob; t
   });
 
   rec.stop();
-  return { blob: await finished, total };
+  const blob = await finished;
+  const header = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+  if (header.length !== 4 || header[0] !== 0x1a || header[1] !== 0x45 || header[2] !== 0xdf || header[3] !== 0xa3) {
+    throw new Error("浏览器未生成有效的 WebM 视频，请使用 Chrome / Edge 重试。");
+  }
+  return { blob, total };
 }

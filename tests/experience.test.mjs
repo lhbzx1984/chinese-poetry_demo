@@ -45,7 +45,7 @@ test('AI仅新任务消耗限流额度，缓存命中和未配置AI仍可读取'
     assert.equal(cached.status, 200);
     const cachedData = (await cached.json()).data;
     assert.equal(cachedData.imagesCached, true);
-    assert.match(cachedData.images[0].url, /v=scenes2_/);
+    assert.match(cachedData.images[0].url, /v=scenes3_/);
     const image = await imageGet(request, { params: Promise.resolve({ id: '1', index: '0' }) });
     assert.equal(image.status, 200);
     assert.equal(new Uint8Array(await image.arrayBuffer())[0], 7, '读图路由必须定位当前分镜缓存');

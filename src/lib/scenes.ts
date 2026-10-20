@@ -132,13 +132,17 @@ export function buildScenes(poem: Poem): { bible: VisualBible; scenes: Scene[] }
   return { bible, scenes };
 }
 
-export function scenePrompt(bible: VisualBible, scene: Scene, poem: Poem): string {
+export function scenePrompt(bible: VisualBible, scene: Scene, poem: Poem, sequence: readonly Scene[]): string {
   const imagery = scene.imagery.length
     ? scene.imagery.map((x) => x.en).join(", ")
-    : "a quiet classical Chinese landscape with soft mist";
+    : "use the most concrete visual detail in the current verse";
+  const poemContext = poem.lines.join(" ").replace(/\s+/g, " ").slice(0, 900);
   return [
-    `Scene ${scene.index + 1} of a cinematic adaptation of the classical Chinese poem "${poem.title}" (${poem.dynasty} dynasty, by ${poem.author}).`,
-    imagery + ".",
+    `Create one photorealistic frame for scene ${scene.index + 1} of ${sequence.length} in a cinematic adaptation of the classical Chinese poem "${poem.title}" (${poem.dynasty} dynasty, by ${poem.author}).`,
+    `PRIMARY SOURCE — the exact verse to depict in this frame: "${scene.text.slice(0, 600)}".`,
+    `Whole-poem context for meaning and visual continuity only: "${poemContext}". Do not combine all verses into one image.`,
+    `Visual cues found in this verse: ${imagery}.`,
+    "Show the specific setting, subject, action, season, weather and time of day conveyed by the PRIMARY SOURCE. If it is emotional or figurative, use a restrained visual motif from the whole poem. Do not add unrelated stock scenery or literal written characters.",
     `Era: ${bible.era}.`,
     `Mood: ${bible.mood.en}.`,
     bible.styleSuffix + ".",

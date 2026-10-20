@@ -1,7 +1,7 @@
 // 场景配图：调用 OpenAI 兼容的 images/generations 端点，逐场景生成电影感画面。
-// 产物缓存在 data/generated/{id}_scenes2_{内容哈希}/{index}.jpg —— 磁盘是唯一事实来源，
+// 产物缓存在 data/generated/{id}_scenes3_{内容哈希}/{index}.jpg —— 磁盘是唯一事实来源，
 // 同一首诗只有第一次访问会生成，之后全部直接命中缓存（不消耗任何生成额度）；
-// 未配置 key 或生成失败时前端使用程序化水墨背景兜底。
+// 未配置 key 或生成失败时前端使用按诗句匹配的本地写实场景兜底。
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -32,7 +32,7 @@ function contentHash(poem: Poem): string {
 
 export function poemDirOf(poem: Poem): string {
   // 分镜规则升级后不能按旧幕序号复用图片和译文；旧目录保留供备份。
-  return path.join(GENERATED_DIR, `${poem.id}_scenes2_${contentHash(poem)}`);
+  return path.join(GENERATED_DIR, `${poem.id}_scenes3_${contentHash(poem)}`);
 }
 
 // 图片服务路由用：只知道 id 时定位缓存目录
@@ -63,7 +63,7 @@ export function imageStatuses(poem: Poem, sceneCount: number) {
     out.push({
       index: i,
       status: ok ? "ready" as const : running ? "pending" as const : "idle" as const,
-      url: ok ? `/api/images/${poem.id}/${i}?v=scenes2_${contentHash(poem)}` : null,
+      url: ok ? `/api/images/${poem.id}/${i}?v=scenes3_${contentHash(poem)}` : null,
     });
   }
   return { list: out, ready, running };
@@ -129,7 +129,7 @@ export function ensureImages(poem: Poem): void {
       if (hasImage(poem, scene.index)) continue;
       if ((failedRounds.get(failKey) ?? 0) >= 2) continue; // 本轮会话内不再重试
       try {
-        await withSlot(() => generateOne(poem, bible, scene.index, scenePrompt(bible, scene, poem)));
+        await withSlot(() => generateOne(poem, bible, scene.index, scenePrompt(bible, scene, poem, scenes)));
         failedRounds.delete(failKey);
       } catch {
         failedRounds.set(failKey, (failedRounds.get(failKey) ?? 0) + 1);

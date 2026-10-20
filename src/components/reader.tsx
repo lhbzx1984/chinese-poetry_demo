@@ -334,12 +334,17 @@ export default function Reader({ poem }: { poem: Poem }) {
       flashNotice("当前浏览器不支持视频录制，请使用 Chrome / Edge。");
       return;
     }
-    if (!exp.images.every((i) => i.status === "ready")) {
-      flashNotice("分镜画面尚未全部生成，请稍候。");
-      return;
-    }
     setClipBusy(true);
     try {
+      const poemContext = poem.lines.join(" ");
+      const images = exp.scenes.map((scene) => {
+        const generated = exp.images[scene.index];
+        if (showIllustrations && generated?.status === "ready" && generated.url) return generated.url;
+        const selected = sceneOverrides[scene.index];
+        return selected
+          ? environmentById(selected).image
+          : matchSceneEnvironment(scene.text, poem.title, poem.tags, poemContext).image;
+      });
       // 1) 逐幕合成旁白（未选音色时默认「晓晓」温柔女声）
       const voice = settingsRef.current.edgeVoice || "zh-CN-XiaoxiaoNeural";
       const pitch = Math.round((settingsRef.current.pitch - 1) * 60);
@@ -393,7 +398,7 @@ export default function Reader({ poem }: { poem: Poem }) {
         exp,
         musicStream,
         narrations,
-        images: [],
+        images,
       });
       ambientMusic.stop();
 
@@ -410,10 +415,11 @@ export default function Reader({ poem }: { poem: Poem }) {
       setClipBusy(false);
       setClipStage(null);
     }
-  }, [exp, clipBusy, musicMood, flashNotice, router]);
+  }, [exp, clipBusy, musicMood, flashNotice, router, poem, sceneOverrides, showIllustrations]);
 
   const scenes = exp?.scenes ?? [];
-  const automaticEnvironments = scenes.map((scene) => matchSceneEnvironment(scene.text, poem.title, poem.tags));
+  const poemContext = poem.lines.join(" ");
+  const automaticEnvironments = scenes.map((scene) => matchSceneEnvironment(scene.text, poem.title, poem.tags, poemContext));
   const sceneEnvironments = scenes.map((scene, index) => {
     const selected = sceneOverrides[scene.index];
     return selected ? environmentById(selected) : automaticEnvironments[index];
@@ -457,8 +463,8 @@ export default function Reader({ poem }: { poem: Poem }) {
           {poem.title} · {poem.dynasty} · {poem.author}
         </span>
         <span className="reader-actions">
-          {exp && exp.mode === "ai" && exp.images.length > 0 && exp.images.every((i) => i.status === "ready") && (
-            <button className="ghost-btn" onClick={() => void makeClip()} disabled={clipBusy} title="用分镜画面、旁白与配乐合成短片">
+          {exp && exp.scenes.length > 0 && (
+            <button className="ghost-btn" onClick={() => void makeClip()} disabled={clipBusy} title="用当前画面、旁白与配乐合成短片">
               {clipBusy ? clipStage ?? "● 合成中…" : "🎬 生成短片"}
             </button>
           )}
@@ -718,7 +724,7 @@ export default function Reader({ poem }: { poem: Poem }) {
                   </div>
                 )}
               </div>
-              {exp?.images[s.index]?.status === "ready" && <p className="scene-export-note">切换只影响阅读画面；生成短片仍使用 AI 配图。</p>}
+              {exp?.images[s.index]?.status === "ready" && <p className="scene-export-note">短片会使用当前选中的画面；没有专属配图时使用匹配场景。</p>}
               {s.imagery.length > 0 && (
                 <div className="scene-imagery">
                   {s.imagery.map((img) => (

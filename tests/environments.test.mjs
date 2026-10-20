@@ -18,6 +18,7 @@ test('诗句意象决定主要场景，诗名只在本幕无景物时兜底', ()
   assert.equal(matchSceneEnvironment('此情可待成追忆。', '夜雨寄北').id, 'rain');
 });
 
-test('无明显景物时保留中性水墨场景', () => {
+test('无明显景物时参考全诗，再退回中性水墨场景', () => {
   assert.equal(matchSceneEnvironment('人生自有道理。').id, 'ink');
+  assert.equal(matchSceneEnvironment('此情难忘。', '', [], '千山飞雪，天地苍茫。').id, 'snow');
 });
