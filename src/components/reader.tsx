@@ -4,17 +4,34 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ExperienceData, Poem } from "@/lib/types";
-import { ambientMusic, moodByName, moodForPoem, ALL_MOOD_NAMES } from "@/lib/ambient-music";
+import {
+  ambientMusic,
+  moodByName,
+  moodForPoem,
+  ALL_MOOD_NAMES,
+} from "@/lib/ambient-music";
 import { generatePoemClip } from "@/lib/clip";
 import {
-  DEFAULT_SETTINGS, loadNarrationSettings, saveNarrationSettings, STYLE_PRESETS, useVoices,
+  DEFAULT_SETTINGS,
+  loadNarrationSettings,
+  saveNarrationSettings,
+  STYLE_PRESETS,
+  useVoices,
   type NarrationSettings,
 } from "@/lib/narration-settings";
+import { audioEngine } from "@/lib/audio-engine";
 import { adminFetch } from "@/lib/admin-client";
+import { Icon } from "./ui/icons";
 import { EDGE_VOICES } from "@/lib/voices";
 
 // 程序化水墨背景：AI 配图不可用或尚未生成时的兜底画面。
-function ProceduralScene({ palette, index }: { palette: [string, string, string]; index: number }) {
+function ProceduralScene({
+  palette,
+  index,
+}: {
+  palette: [string, string, string];
+  index: number;
+}) {
   const [dark, mid, light] = palette;
   const flip = index % 2 === 1;
   const moonX = flip ? "72%" : "24%";
@@ -53,7 +70,8 @@ function ProceduralScene({ palette, index }: { palette: [string, string, string]
           height: "22%",
           opacity: 0.4,
           background: mid,
-          clipPath: "polygon(0 100%, 0 55%, 18% 30%, 31% 58%, 45% 10%, 58% 50%, 74% 22%, 88% 56%, 100% 40%, 100% 100%)",
+          clipPath:
+            "polygon(0 100%, 0 55%, 18% 30%, 31% 58%, 45% 10%, 58% 50%, 74% 22%, 88% 56%, 100% 40%, 100% 100%)",
           filter: "blur(2px)",
         }}
       />
@@ -64,6 +82,8 @@ function ProceduralScene({ palette, index }: { palette: [string, string, string]
 export default function Reader({ poem }: { poem: Poem }) {
   const [exp, setExp] = useState<ExperienceData | null>(null);
   const [active, setActive] = useState(0);
+  const [vertical, setVertical] = useState(false);
+  const [fontSize, setFontSize] = useState(32);
   const [speaking, setSpeaking] = useState(false);
   const [settings, setSettings] = useState<NarrationSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
@@ -77,14 +97,31 @@ export default function Reader({ poem }: { poem: Poem }) {
   const stopRef = useRef(false);
   const sectionRefs = useRef<(HTMLElement | null)[]>([]);
   const settingsRef = useRef(settings);
-  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
   const soloRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsMemo = useRef(new Map<string, string>());
 
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      try {
+        const raw = localStorage.getItem("shijing:reader-layout");
+        setVertical(raw ? raw === "vertical" : window.innerWidth >= 640);
+        const size = Number(localStorage.getItem("shijing:reader-size"));
+        if ([26, 32, 40].includes(size)) setFontSize(size);
+      } catch {
+        /* 使用横排默认 */
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   // 朗读偏好本机记忆
   useEffect(() => {
-    const frame = requestAnimationFrame(() => setSettings(loadNarrationSettings()));
+    const frame = requestAnimationFrame(() =>
+      setSettings(loadNarrationSettings()),
+    );
     return () => cancelAnimationFrame(frame);
   }, []);
   const update = useCallback((patch: Partial<NarrationSettings>) => {
@@ -109,7 +146,11 @@ export default function Reader({ poem }: { poem: Poem }) {
           if (!d.settled) timer = setTimeout(poll, 3000);
         } else {
           setNotice(d.error || "诗境载入失败，请刷新重试。");
-          if (r.status === 429) timer = setTimeout(poll, Math.max(1, Number(r.headers.get("Retry-After")) || 60) * 1000);
+          if (r.status === 429)
+            timer = setTimeout(
+              poll,
+              Math.max(1, Number(r.headers.get("Retry-After")) || 60) * 1000,
+            );
         }
       } catch {
         if (!stop) setNotice("网络连接失败，请刷新后重试。");
@@ -134,7 +175,7 @@ export default function Reader({ poem }: { poem: Poem }) {
           }
         }
       },
-      { rootMargin: "-46% 0px -46% 0px", threshold: 0 }
+      { rootMargin: "-46% 0px -46% 0px", threshold: 0 },
     );
     for (const el of sectionRefs.current) if (el) observer.observe(el);
     return () => observer.disconnect();
@@ -160,7 +201,10 @@ export default function Reader({ poem }: { poem: Poem }) {
       const m = moodByName(custom);
       if (m) return m;
     }
-    return moodForPoem(exp?.visualBible.palette.zh ?? "", exp?.visualBible.mood ?? "");
+    return moodForPoem(
+      exp?.visualBible.palette.zh ?? "",
+      exp?.visualBible.mood ?? "",
+    );
   }, [exp]);
 
   const stopAll = useCallback(() => {
@@ -194,18 +238,21 @@ export default function Reader({ poem }: { poem: Poem }) {
     return url;
   }, []);
 
-  const playEdge = useCallback(async (text: string) => {
-    const url = await synthUrl(text, settingsRef.current.edgeVoice);
-    const audio = new Audio(url); // 语速/音调已在服务端合成
-    audioRef.current = audio;
-    audio.onplay = () => ambientMusic.setDuck(true);
-    await new Promise<void>((resolve) => {
-      audio.onended = () => resolve();
-      audio.onerror = () => resolve();
-      audio.play().catch(() => resolve());
-    });
-    audioRef.current = null;
-  }, [synthUrl]);
+  const playEdge = useCallback(
+    async (text: string) => {
+      const url = await synthUrl(text, settingsRef.current.edgeVoice);
+      const audio = new Audio(url); // 语速/音调已在服务端合成
+      audioRef.current = audio;
+      audio.onplay = () => ambientMusic.setDuck(true);
+      await new Promise<void>((resolve) => {
+        audio.onended = () => resolve();
+        audio.onerror = () => resolve();
+        audio.play().catch(() => resolve());
+      });
+      audioRef.current = null;
+    },
+    [synthUrl],
+  );
 
   const speakBrowser = useCallback((text: string) => {
     return new Promise<void>((resolve) => {
@@ -215,7 +262,9 @@ export default function Reader({ poem }: { poem: Poem }) {
       u.lang = "zh-CN";
       u.rate = s.rate;
       u.pitch = s.pitch;
-      const voice = window.speechSynthesis.getVoices().find((v) => v.voiceURI === s.voiceURI);
+      const voice = window.speechSynthesis
+        .getVoices()
+        .find((v) => v.voiceURI === s.voiceURI);
       if (voice) u.voice = voice;
       u.onstart = () => ambientMusic.setDuck(true);
       u.onend = () => resolve();
@@ -247,14 +296,21 @@ export default function Reader({ poem }: { poem: Poem }) {
     try {
       if (settingsRef.current.edgeVoice) await playEdge(announce);
       else await speakBrowser(announce);
-    } catch { /* 朗读开场白失败不阻塞正文 */ }
+    } catch {
+      /* 朗读开场白失败不阻塞正文 */
+    }
     ambientMusic.setDuck(false);
     const scenes = exp.scenes;
     for (let i = 0; i < scenes.length; i++) {
       if (stopRef.current) break;
       const s = scenes[i];
       setActive(i);
-      sectionRefs.current[i]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
+      sectionRefs.current[i]?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "instant"
+          : "smooth",
+        block: "start",
+      });
       const text = s.lines.join("。");
       const useEdge = Boolean(settingsRef.current.edgeVoice);
       try {
@@ -262,19 +318,35 @@ export default function Reader({ poem }: { poem: Poem }) {
         else await speakBrowser(text);
       } catch (e) {
         if (useEdge) {
-          flashNotice(`Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），本幕改用浏览器语音。`);
+          flashNotice(
+            `Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），本幕改用浏览器语音。`,
+          );
           await speakBrowser(text);
         }
       }
       ambientMusic.setDuck(false);
       if (!stopRef.current && i < scenes.length - 1) {
         await new Promise((r) => setTimeout(r, 600));
-        if (settingsRef.current.edgeVoice) synthUrl(scenes[i + 1].lines.join("。"), settingsRef.current.edgeVoice).catch(() => void 0);
+        if (settingsRef.current.edgeVoice)
+          synthUrl(
+            scenes[i + 1].lines.join("。"),
+            settingsRef.current.edgeVoice,
+          ).catch(() => void 0);
       }
     }
     if (!soloRef.current) ambientMusic.stop();
     setSpeaking(false);
-  }, [exp, speaking, stopAll, ensureMusic, speakBrowser, playEdge, flashNotice, synthUrl, poem]);
+  }, [
+    exp,
+    speaking,
+    stopAll,
+    ensureMusic,
+    speakBrowser,
+    playEdge,
+    flashNotice,
+    synthUrl,
+    poem,
+  ]);
 
   // 只听配乐：单独开关
   const toggleMusicSolo = useCallback(() => {
@@ -320,7 +392,9 @@ export default function Reader({ poem }: { poem: Poem }) {
         await audio.play();
         return;
       } catch (e) {
-        flashNotice(`Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），试听改用浏览器语音。`);
+        flashNotice(
+          `Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），试听改用浏览器语音。`,
+        );
       }
     }
     await speakBrowser(text);
@@ -330,7 +404,10 @@ export default function Reader({ poem }: { poem: Poem }) {
   // 生成短片（用户点击触发）：旁白（Edge 音色）+ 意境配乐 + 分镜画面 合成 WebM，保存到影片馆
   const makeClip = useCallback(async () => {
     if (!exp || clipBusy) return;
-    if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) {
+    if (
+      typeof MediaRecorder === "undefined" ||
+      !HTMLCanvasElement.prototype.captureStream
+    ) {
       flashNotice("当前浏览器不支持视频录制，请使用 Chrome / Edge。");
       return;
     }
@@ -339,6 +416,7 @@ export default function Reader({ poem }: { poem: Poem }) {
       return;
     }
     setClipBusy(true);
+    await audioEngine.unlock();
     try {
       // 1) 逐幕合成旁白（未选音色时默认「晓晓」温柔女声）
       const voice = settingsRef.current.edgeVoice || "zh-CN-XiaoxiaoNeural";
@@ -346,20 +424,28 @@ export default function Reader({ poem }: { poem: Poem }) {
       const rate = settingsRef.current.rate;
       const narrations: { sceneIndex: number; mp3: ArrayBuffer }[] = [];
       let ttsOk = true;
-      let ttsError = '';
+      let ttsError = "";
       // 片头旁白：诗名与作者
       setClipStage("合成片头旁白…");
       try {
         const r = await fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: `《${exp.poem.title}》，${exp.poem.author}。`, voice, pitch, rate }),
+          body: JSON.stringify({
+            text: `《${exp.poem.title}》，${exp.poem.author}。`,
+            voice,
+            pitch,
+            rate,
+          }),
         });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '旁白合成失败。');
+        if (!r.ok)
+          throw new Error(
+            (await r.json().catch(() => ({}))).error || "旁白合成失败。",
+          );
         narrations.push({ sceneIndex: -1, mp3: await r.arrayBuffer() });
       } catch (e) {
         ttsOk = false;
-        ttsError = e instanceof Error ? e.message : '旁白合成失败。';
+        ttsError = e instanceof Error ? e.message : "旁白合成失败。";
       }
       for (let i = 0; i < exp.scenes.length; i++) {
         setClipStage(`合成旁白 ${i + 1}/${exp.scenes.length}…`);
@@ -367,16 +453,25 @@ export default function Reader({ poem }: { poem: Poem }) {
           const r = await fetch("/api/tts", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: exp.scenes[i].lines.join("。"), voice, pitch, rate }),
+            body: JSON.stringify({
+              text: exp.scenes[i].lines.join("。"),
+              voice,
+              pitch,
+              rate,
+            }),
           });
-          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '旁白合成失败。');
+          if (!r.ok)
+            throw new Error(
+              (await r.json().catch(() => ({}))).error || "旁白合成失败。",
+            );
           narrations.push({ sceneIndex: i, mp3: await r.arrayBuffer() });
         } catch (e) {
           ttsOk = false; // 单幕失败：该幕静音，继续生成
-          ttsError = e instanceof Error ? e.message : '旁白合成失败。';
+          ttsError = e instanceof Error ? e.message : "旁白合成失败。";
         }
       }
-      if (!ttsOk) flashNotice(`${ttsError} 部分旁白合成失败，对应幕将只有配乐。`);
+      if (!ttsOk)
+        flashNotice(`${ttsError} 部分旁白合成失败，对应幕将只有配乐。`);
 
       // 2) 启动意境配乐（其实时流将作为一条音轨混入）
       const s = settingsRef.current;
@@ -399,9 +494,20 @@ export default function Reader({ poem }: { poem: Poem }) {
 
       // 4) 保存到影片馆并跳转
       setClipStage("保存到影片馆…");
-      const qs = new URLSearchParams({ title: exp.poem.title, author: exp.poem.author, duration: total.toFixed(1) });
-      const up = await adminFetch(`/api/videos?${qs}`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: blob });
-      if (!up.ok) throw new Error((await up.json().catch(() => ({}))).error ?? "保存失败");
+      const qs = new URLSearchParams({
+        title: exp.poem.title,
+        author: exp.poem.author,
+        duration: total.toFixed(1),
+      });
+      const up = await adminFetch(`/api/videos?${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "video/webm" },
+        body: blob,
+      });
+      if (!up.ok)
+        throw new Error(
+          (await up.json().catch(() => ({}))).error ?? "保存失败",
+        );
       router.push("/video");
     } catch (e) {
       ambientMusic.stop();
@@ -412,16 +518,72 @@ export default function Reader({ poem }: { poem: Poem }) {
     }
   }, [exp, clipBusy, musicMood, flashNotice, router]);
 
-  const palette = exp?.visualBible.palette.css ?? ["#0a1a24", "#28505c", "#cfd8e3"];
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowSettings(false);
+        return;
+      }
+      if (
+        e.repeat ||
+        clipBusy ||
+        e.altKey ||
+        e.ctrlKey ||
+        e.metaKey ||
+        (e.target as HTMLElement).closest(
+          "input,select,textarea,button,a,[contenteditable=true]",
+        )
+      )
+        return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        void narrate();
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const next = Math.max(
+          0,
+          Math.min(
+            (exp?.scenes.length || 1) - 1,
+            active + (e.key === "ArrowRight" ? 1 : -1),
+          ),
+        );
+        setActive(next);
+        sectionRefs.current[next]?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion:reduce)").matches
+            ? "instant"
+            : "smooth",
+          block: "start",
+        });
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [active, exp, clipBusy, narrate]);
+
+  const palette = exp?.visualBible.palette.css ?? [
+    "#0a1a24",
+    "#28505c",
+    "#cfd8e3",
+  ];
   const scenes = exp?.scenes ?? [];
-  const moodName = exp ? moodForPoem(exp.visualBible.palette.zh, exp.visualBible.mood).name : "";
+  const moodName = exp
+    ? moodForPoem(exp.visualBible.palette.zh, exp.visualBible.mood).name
+    : "";
 
   return (
-    <div className="reader-root">
+    <main
+      id="main-content"
+      tabIndex={-1}
+      className={`reader-root${vertical ? " vertical" : ""}`}
+      style={{ "--poem-size": `${fontSize}px` } as React.CSSProperties}
+    >
       {/* 固定画面舞台 */}
       <div className="stage" aria-hidden>
         {scenes.map((s) => (
-          <div key={s.index} className={`stage-layer${active === s.index ? " active" : ""}`}>
+          <div
+            key={s.index}
+            className={`stage-layer${active === s.index ? " active" : ""}`}
+          >
             <ProceduralScene palette={palette} index={s.index} />
             {exp?.images[s.index]?.status === "ready" && (
               // eslint-disable-next-line @next/next/no-img-element
@@ -436,7 +598,7 @@ export default function Reader({ poem }: { poem: Poem }) {
         <div className="scrim" />
       </div>
 
-      <nav className="reader-top">
+      <div className="reader-controls">
         <Link className="ghost-btn" href="/">
           ← 返回首页
         </Link>
@@ -444,26 +606,89 @@ export default function Reader({ poem }: { poem: Poem }) {
           {poem.title} · {poem.dynasty} · {poem.author}
         </span>
         <span className="reader-actions">
-          {exp && exp.mode === "ai" && exp.images.length > 0 && exp.images.every((i) => i.status === "ready") && (
-            <button className="ghost-btn" onClick={() => void makeClip()} disabled={clipBusy} title="用分镜画面、旁白与配乐合成短片">
-              {clipBusy ? clipStage ?? "● 合成中…" : "🎬 生成短片"}
-            </button>
-          )}
-          <button className={`ghost-btn${showSettings ? " speaking" : ""}`} onClick={() => setShowSettings((v) => !v)}>
-            ♪ 朗读设置
+          <button
+            className="ghost-btn"
+            aria-pressed={vertical}
+            onClick={() => {
+              setVertical(!vertical);
+              try {
+                localStorage.setItem(
+                  "shijing:reader-layout",
+                  !vertical ? "vertical" : "horizontal",
+                );
+              } catch {
+                /* 忽略 */
+              }
+            }}
+          >
+            <Icon name="vertical" />
+            {vertical ? "横排" : "竖排"}
           </button>
-          <button className={`ghost-btn${speaking ? " speaking" : ""}`} onClick={() => void narrate()}>
-            {speaking ? "■ 停止朗读" : "▶ 聆听全诗"}
+          <label className="sr-only" htmlFor="reader-size">
+            诗文字号
+          </label>
+          <select
+            id="reader-size"
+            value={fontSize}
+            onChange={(e) => {
+              const size = Number(e.target.value);
+              setFontSize(size);
+              try {
+                localStorage.setItem("shijing:reader-size", String(size));
+              } catch {
+                /* 忽略 */
+              }
+            }}
+          >
+            <option value="26">字号 S</option>
+            <option value="32">字号 M</option>
+            <option value="40">字号 L</option>
+          </select>
+          {exp &&
+            exp.mode === "ai" &&
+            exp.images.length > 0 &&
+            exp.images.every((i) => i.status === "ready") && (
+              <button
+                className="ghost-btn"
+                onClick={() => void makeClip()}
+                disabled={clipBusy}
+                title="用分镜画面、旁白与配乐合成短片"
+              >
+                <Icon name="film" />
+                {clipBusy ? (clipStage ?? "合成中…") : "生成短片"}
+              </button>
+            )}
+          <button
+            className={`ghost-btn${showSettings ? " speaking" : ""}`}
+            onClick={() => setShowSettings((v) => !v)}
+          >
+            <Icon name="settings" />
+            朗读设置
+          </button>
+          <button
+            className={`ghost-btn${speaking ? " speaking" : ""}`}
+            onClick={() => void narrate()}
+          >
+            <Icon name={speaking ? "pause" : "play"} />
+            {speaking ? "停止朗读" : "聆听全诗"}
           </button>
         </span>
-      </nav>
+      </div>
 
+      <div className="ai-note">
+        空格：朗读 / 暂停　← →：上一幕 / 下一幕　·　译文与配图由 AI
+        生成，仅供欣赏参考。
+      </div>
       {showSettings && (
         <div className="settings-pop">
           <div className="set-title">朗读设置</div>
           <div className="set-row">
             <label>朗读音色</label>
-            <select aria-label="朗读音色" value={settings.edgeVoice} onChange={(e) => update({ edgeVoice: e.target.value })}>
+            <select
+              aria-label="朗读音色"
+              value={settings.edgeVoice}
+              onChange={(e) => update({ edgeVoice: e.target.value })}
+            >
               <optgroup label="Edge 在线神经语音（自然流畅 · 需联网）">
                 {EDGE_VOICES.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -477,25 +702,35 @@ export default function Reader({ poem }: { poem: Poem }) {
             </select>
           </div>
           <p className="set-note" style={{ marginTop: -6 }}>
-            Edge 神经语音免费无需配置，男女音色随意切换，语速与音调即时生效；网络异常时自动回退浏览器语音。
+            Edge
+            神经语音免费无需配置，男女音色随意切换，语速与音调即时生效；网络异常时自动回退浏览器语音。
           </p>
 
           {!settings.edgeVoice && (
             <>
               <div className="set-row">
                 <label>系统声音</label>
-                <select aria-label="系统声音" value={settings.voiceURI} onChange={(e) => update({ voiceURI: e.target.value })}>
-                  <option value="">系统默认{voices.length ? `（共 ${voices.length} 个中文语音）` : ""}</option>
+                <select
+                  aria-label="系统声音"
+                  value={settings.voiceURI}
+                  onChange={(e) => update({ voiceURI: e.target.value })}
+                >
+                  <option value="">
+                    系统默认
+                    {voices.length ? `（共 ${voices.length} 个中文语音）` : ""}
+                  </option>
                   {voices.map((v) => (
                     <option key={v.voiceURI} value={v.voiceURI}>
-                      {v.name}（{v.lang}{v.localService ? " · 本机" : " · 在线"}）
+                      {v.name}（{v.lang}
+                      {v.localService ? " · 本机" : " · 在线"}）
                     </option>
                   ))}
                 </select>
               </div>
               <p className="set-note" style={{ marginTop: -6 }}>
-                可选声音来自本机与浏览器内置语音：Windows 设置 → 时间和语言 → 语音 中安装的中文语音包越多，可选项越多；
-                用 Edge 浏览器打开还能使用「晓晓」等自然在线语音。
+                可选声音来自本机与浏览器内置语音：Windows 设置 → 时间和语言 →
+                语音 中安装的中文语音包越多，可选项越多； 用 Edge
+                浏览器打开还能使用「晓晓」等自然在线语音。
               </p>
             </>
           )}
@@ -516,16 +751,24 @@ export default function Reader({ poem }: { poem: Poem }) {
           <div className="set-row">
             <label>语速 {settings.rate.toFixed(2)}×</label>
             <input
-              type="range" min={0.6} max={1.2} step={0.05}
-              aria-label="语速" value={settings.rate}
+              type="range"
+              min={0.6}
+              max={1.2}
+              step={0.05}
+              aria-label="语速"
+              value={settings.rate}
               onChange={(e) => update({ rate: Number(e.target.value) })}
             />
           </div>
           <div className="set-row">
             <label>音调 {settings.pitch.toFixed(2)}</label>
             <input
-              type="range" min={0.8} max={1.15} step={0.05}
-              aria-label="音调" value={settings.pitch}
+              type="range"
+              min={0.8}
+              max={1.15}
+              step={0.05}
+              aria-label="音调"
+              value={settings.pitch}
               onChange={(e) => update({ pitch: Number(e.target.value) })}
             />
           </div>
@@ -535,18 +778,31 @@ export default function Reader({ poem }: { poem: Poem }) {
             <button
               className={`chip small${settings.music ? " active" : ""}`}
               onClick={() => update({ music: !settings.music })}
-              title={settings.music ? "正在随朗读播放，点击关闭" : "已关闭，点击开启"}
+              title={
+                settings.music ? "正在随朗读播放，点击关闭" : "已关闭，点击开启"
+              }
             >
-              {settings.music ? "♪ 配乐：开" : "✕ 配乐：关"}
+              <Icon name={settings.music ? "speaker" : "muted"} />
+              {settings.music ? "配乐：开" : "配乐：关"}
             </button>
-            <button className={`chip small${musicSolo ? " active" : ""}`} onClick={toggleMusicSolo}>
-              {musicSolo ? "■ 停止配乐" : "▶ 只听配乐"}
+            <button
+              className={`chip small${musicSolo ? " active" : ""}`}
+              onClick={toggleMusicSolo}
+            >
+              <Icon name={musicSolo ? "pause" : "play"} />
+              {musicSolo ? "停止配乐" : "只听配乐"}
             </button>
-            <span className="mood-hint">{exp ? `当前意境 · ${moodName}` : "进入诗境后自动匹配"}</span>
+            <span className="mood-hint">
+              {exp ? `当前意境 · ${moodName}` : "进入诗境后自动匹配"}
+            </span>
           </div>
           <div className="set-row">
             <label>配乐意境</label>
-            <select aria-label="配乐意境" value={settings.musicMood} onChange={(e) => update({ musicMood: e.target.value })}>
+            <select
+              aria-label="配乐意境"
+              value={settings.musicMood}
+              onChange={(e) => update({ musicMood: e.target.value })}
+            >
               <option value="">自动 · 随诗匹配</option>
               {ALL_MOOD_NAMES.map((n) => (
                 <option key={n} value={n}>
@@ -558,8 +814,12 @@ export default function Reader({ poem }: { poem: Poem }) {
           <div className="set-row">
             <label>乐声 {Math.round(settings.musicVolume * 100)}%</label>
             <input
-              type="range" min={0} max={1} step={0.05}
-              aria-label="乐声音量" value={settings.musicVolume}
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              aria-label="乐声音量"
+              value={settings.musicVolume}
               onChange={(e) => {
                 update({ musicVolume: Number(e.target.value) });
                 ambientMusic.setVolume(Number(e.target.value));
@@ -568,15 +828,20 @@ export default function Reader({ poem }: { poem: Poem }) {
           </div>
           <div className="set-row">
             <button className="chip small" onClick={() => void preview()}>
-              {previewing ? "■ 停止试听" : "▶ 试听当前效果"}
+              <Icon name={previewing ? "pause" : "play"} />
+              {previewing ? "停止试听" : "试听当前效果"}
             </button>
           </div>
           <p className="set-note">
             背景音乐为实时生成的古琴风环境音，随诗的情绪自动变化；朗读时只会温和压低，不会盖住人声。
             Edge 音色的语速/音调在合成时生效，结果会缓存，重复朗读不重复合成。
           </p>
-          <button className="pop-close" onClick={() => setShowSettings(false)} aria-label="关闭">
-            ×
+          <button
+            className="pop-close"
+            onClick={() => setShowSettings(false)}
+            aria-label="关闭"
+          >
+            <Icon name="close" />
           </button>
         </div>
       )}
@@ -588,37 +853,81 @@ export default function Reader({ poem }: { poem: Poem }) {
               key={s.index}
               className={`dot${active === s.index ? " active" : ""}`}
               aria-label={`跳转至第 ${s.index + 1} 幕`}
-              onClick={() => sectionRefs.current[s.index]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })}
+              onClick={() =>
+                sectionRefs.current[s.index]?.scrollIntoView({
+                  behavior: window.matchMedia(
+                    "(prefers-reduced-motion: reduce)",
+                  ).matches
+                    ? "instant"
+                    : "smooth",
+                })
+              }
             />
           ))}
         </div>
       )}
 
-      {exp && exp.mode === "ai" && exp.aiProgress.done < exp.aiProgress.total && exp.images.some(i => i.status === 'pending') && (
+      {exp &&
+        exp.mode === "ai" &&
+        exp.aiProgress.done < exp.aiProgress.total &&
+        exp.images.some((i) => i.status === "pending") && (
+          <div className="ai-note">
+            分镜画面绘制中 {exp.aiProgress.done}/{exp.aiProgress.total} ·
+            完成后自动淡入
+          </div>
+        )}
+      {exp &&
+        exp.mode === "ai" &&
+        exp.aiProgress.done >= exp.aiProgress.total && (
+          <div className="ai-note">
+            {exp.imagesCached
+              ? "配图取自本地图库 · 未消耗生成额度"
+              : `分镜配图 ${exp.aiProgress.done}/${exp.aiProgress.total} · 已保存到本地图库`}
+          </div>
+        )}
+      {clipBusy && (
         <div className="ai-note">
-          分镜画面绘制中 {exp.aiProgress.done}/{exp.aiProgress.total} · 完成后自动淡入
+          {clipStage ?? "短片合成中"} · 完成后自动前往影片馆
         </div>
       )}
-      {exp && exp.mode === "ai" && exp.aiProgress.done >= exp.aiProgress.total && (
-        <div className="ai-note">
-          {exp.imagesCached ? "配图取自本地图库 · 未消耗生成额度" : `分镜配图 ${exp.aiProgress.done}/${exp.aiProgress.total} · 已保存到本地图库`}
+      {exp && exp.mode === "fallback" && (
+        <div className="ai-note">未配置 AI 配图 · 展示程序化水墨意境</div>
+      )}
+      {exp &&
+        exp.mode === "ai" &&
+        exp.aiProgress.done < exp.aiProgress.total &&
+        !exp.images.some((i) => i.status === "pending") && (
+          <div className="ai-note">部分配图未能生成 · 展示程序化水墨意境</div>
+        )}
+      {notice && (
+        <div className="ai-note warn" role="alert">
+          {notice}
         </div>
       )}
-      {clipBusy && <div className="ai-note">{clipStage ?? "短片合成中"} · 完成后自动前往影片馆</div>}
-      {exp && exp.mode === "fallback" && <div className="ai-note">未配置 AI 配图 · 展示程序化水墨意境</div>}
-      {exp && exp.mode === 'ai' && exp.aiProgress.done < exp.aiProgress.total && !exp.images.some(i => i.status === 'pending') && <div className="ai-note">部分配图未能生成 · 展示程序化水墨意境</div>}
-      {notice && <div className="ai-note warn" role="alert">{notice}</div>}
 
       <div className="scene-wrap">
         <section className="title-block">
           <div className="eyebrow">Immersive Poetry · 沉浸诗境</div>
           {poem.subtitle && (
-            <p style={{ margin: "0 0 10px", color: "var(--gold)", letterSpacing: "0.3em", fontSize: 15 }}>
+            <p
+              style={{
+                margin: "0 0 10px",
+                color: "var(--gold)",
+                letterSpacing: "0.3em",
+                fontSize: 15,
+              }}
+            >
               【{poem.subtitle}】
             </p>
           )}
           <h1>{poem.title}</h1>
-          {!exp && notice && <div className="scene-lines">{poem.lines.map((line, i) => <p key={i}>{line}</p>)}</div>}
+          {!exp && notice && (
+            <div className="scene-lines">
+              {poem.lines.map((line, i) => (
+                <p key={i}>{line}</p>
+              ))}
+            </div>
+          )}
           <p className="ai-disclaimer">译文与配图由 AI 生成，仅供欣赏参考。</p>
           <p className="meta">
             {poem.dynasty} · {poem.author}
@@ -627,8 +936,14 @@ export default function Reader({ poem }: { poem: Poem }) {
             <div className="bible">
               <span className="bible-chip">{exp.visualBible.era}</span>
               <span className="bible-chip">{exp.visualBible.mood}</span>
-              <span className="bible-chip">色调 · {exp.visualBible.palette.zh}</span>
-              {exp.visualBible.imagerySummary && <span className="bible-chip">意象 · {exp.visualBible.imagerySummary}</span>}
+              <span className="bible-chip">
+                色调 · {exp.visualBible.palette.zh}
+              </span>
+              {exp.visualBible.imagerySummary && (
+                <span className="bible-chip">
+                  意象 · {exp.visualBible.imagerySummary}
+                </span>
+              )}
             </div>
           )}
           <div className="scroll-hint">向下滚动 · 步入诗境 ↓</div>
@@ -643,9 +958,13 @@ export default function Reader({ poem }: { poem: Poem }) {
               sectionRefs.current[s.index] = el;
             }}
           >
-            <div className={`scene-card${active === s.index ? " visible" : ""}`}>
+            <div
+              className={`scene-card${active === s.index ? " visible" : ""}`}
+            >
               <div className="scene-no">
-                <span className="num">{["壹", "贰", "叁", "肆", "伍", "陆"][s.index] ?? s.index + 1}</span>
+                <span className="num">
+                  {["壹", "贰", "叁", "肆", "伍", "陆"][s.index] ?? s.index + 1}
+                </span>
                 <span className="cap">
                   幕 {s.index + 1} / {scenes.length}
                 </span>
@@ -676,7 +995,9 @@ export default function Reader({ poem }: { poem: Poem }) {
         ))}
 
         <section className="finale">
-          <a href="https://github.com/chinese-poetry/chinese-poetry">诗词数据：chinese-poetry（MIT）</a>
+          <a href="https://github.com/chinese-poetry/chinese-poetry">
+            诗词数据：chinese-poetry（MIT）
+          </a>
           <div className="end-mark">全诗终</div>
           <p>
             《{poem.title}》 · {poem.dynasty} · {poem.author}
@@ -688,6 +1009,6 @@ export default function Reader({ poem }: { poem: Poem }) {
           </Link>
         </section>
       </div>
-    </div>
+    </main>
   );
 }
