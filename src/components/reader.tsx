@@ -12,18 +12,12 @@ import {
 } from "@/lib/narration-settings";
 import { adminFetch } from "@/lib/admin-client";
 import { EDGE_VOICES } from "@/lib/voices";
-import { environmentById, matchSceneEnvironment, SCENE_ENVIRONMENTS, type SceneEnvironmentId } from "@/lib/scene-environments";
+import { environmentById, matchSceneEnvironment, SCENE_ENVIRONMENTS, type SceneEnvironment, type SceneEnvironmentId } from "@/lib/scene-environments";
 
-// 每幕对应一种可切换的程序化场景；不依赖 AI 密钥，也不会改写诗句。
-function EnvironmentScene({ environment, index }: { environment: SceneEnvironmentId; index: number }) {
+// 本地写实场景资源无需运行时 AI 密钥；诗句和手动选择共同决定画面。
+function EnvironmentScene({ environment }: { environment: SceneEnvironment }) {
   return (
-    <div className={`environment-art${index % 2 ? " mirrored" : ""}`} data-environment={environment}>
-      <span className="environment-glow" />
-      <span className="environment-orb" />
-      <span className="environment-back" />
-      <span className="environment-front" />
-      <span className="environment-detail" />
-    </div>
+    <div className="environment-art" style={{ backgroundImage: `url("${environment.image}")` }} />
   );
 }
 
@@ -441,7 +435,7 @@ export default function Reader({ poem }: { poem: Poem }) {
       <div className="stage" aria-hidden>
         {scenes.map((s) => (
           <div key={s.index} className={`stage-layer${active === s.index ? " active" : ""}`}>
-            <EnvironmentScene environment={sceneEnvironments[s.index].id} index={s.index} />
+            <EnvironmentScene environment={sceneEnvironments[s.index]} />
             {showIllustrations && exp?.images[s.index]?.status === "ready" && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -624,8 +618,8 @@ export default function Reader({ poem }: { poem: Poem }) {
         </div>
       )}
       {clipBusy && <div className="ai-note">{clipStage ?? "短片合成中"} · 完成后自动前往影片馆</div>}
-      {exp && exp.mode === "fallback" && <div className="ai-note">未配置 AI 配图 · 展示程序化水墨意境</div>}
-      {exp && exp.mode === 'ai' && exp.aiProgress.done < exp.aiProgress.total && !exp.images.some(i => i.status === 'pending') && <div className="ai-note">部分配图未能生成 · 展示程序化水墨意境</div>}
+      {exp && exp.mode === "fallback" && <div className="ai-note">未配置 AI 配图 · 展示写实风格诗境画面</div>}
+      {exp && exp.mode === 'ai' && exp.aiProgress.done < exp.aiProgress.total && !exp.images.some(i => i.status === 'pending') && <div className="ai-note">部分配图未能生成 · 展示写实风格诗境画面</div>}
       {notice && <div className="ai-note warn" role="alert">{notice}</div>}
 
       <div className="scene-wrap">
@@ -661,6 +655,7 @@ export default function Reader({ poem }: { poem: Poem }) {
                   <button
                     key={scene.index}
                     className="journey-stop"
+                    style={{ backgroundImage: `linear-gradient(180deg, rgba(4, 12, 15, 0.42), rgba(4, 12, 15, 0.9)), url("${sceneEnvironments[scene.index].image}")` }}
                     onClick={() => sectionRefs.current[scene.index]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })}
                     aria-label={`进入第 ${scene.index + 1} 幕：${sceneEnvironments[scene.index].name}`}
                   >

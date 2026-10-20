@@ -1,7 +1,14 @@
 import './register.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-const { matchSceneEnvironment } = await import('../src/lib/scene-environments.ts');
+import { existsSync } from 'node:fs';
+const { matchSceneEnvironment, SCENE_ENVIRONMENTS } = await import('../src/lib/scene-environments.ts');
+
+test('每一种阅读环境都有本地背景图', () => {
+  for (const environment of SCENE_ENVIRONMENTS) {
+    assert.ok(existsSync(new URL(`../public${environment.image}`, import.meta.url)), `${environment.name} 缺少背景图`);
+  }
+});
 
 test('诗句意象决定主要场景，诗名只在本幕无景物时兜底', () => {
   assert.equal(matchSceneEnvironment('床前明月光，疑是地上霜。').id, 'moon');
