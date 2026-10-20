@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import type { AuthorInfo, MetaInfo, PoemListResult } from "@/lib/types";
+import { matchSceneEnvironment } from "@/lib/scene-environments";
 
 const PAGE_SIZE = 24;
 
@@ -254,6 +255,7 @@ export default function Library() {
                           {p.dynasty} · {p.author}
                         </span>
                         <span className="first">{p.firstLine}</span>
+                        <span className="poem-environment">画面建议 · {matchSceneEnvironment(p.firstLine, p.title, p.tags).name}</span>
                         <span className="tags">
                           {p.tags.map((t) => (
                             <span key={t}>{t}</span>

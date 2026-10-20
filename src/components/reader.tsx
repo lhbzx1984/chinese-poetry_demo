@@ -12,58 +12,20 @@ import {
 } from "@/lib/narration-settings";
 import { adminFetch } from "@/lib/admin-client";
 import { EDGE_VOICES } from "@/lib/voices";
+import { environmentById, matchSceneEnvironment, SCENE_ENVIRONMENTS, type SceneEnvironment, type SceneEnvironmentId } from "@/lib/scene-environments";
 
-// 程序化水墨背景：AI 配图不可用或尚未生成时的兜底画面。
-function ProceduralScene({ palette, index }: { palette: [string, string, string]; index: number }) {
-  const [dark, mid, light] = palette;
-  const flip = index % 2 === 1;
-  const moonX = flip ? "72%" : "24%";
-  const moonY = flip ? "20%" : "16%";
+// 本地写实场景资源无需运行时 AI 密钥；诗句和手动选择共同决定画面。
+function EnvironmentScene({ environment }: { environment: SceneEnvironment }) {
   return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        background: `
-          radial-gradient(circle at ${moonX} ${moonY}, ${light}66 0%, ${light}22 7%, transparent 16%),
-          radial-gradient(ellipse 80% 55% at ${flip ? "20%" : "78%"} 108%, ${dark} 0%, transparent 60%),
-          linear-gradient(165deg, ${dark} 0%, ${mid} 68%, ${light}33 100%)`,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          bottom: "-4%",
-          left: flip ? "-10%" : "30%",
-          width: "75%",
-          height: "34%",
-          opacity: 0.75,
-          background: dark,
-          clipPath:
-            "polygon(0 100%, 0 62%, 12% 38%, 24% 60%, 37% 12%, 49% 55%, 63% 26%, 76% 62%, 89% 18%, 100% 66%, 100% 100%)",
-          filter: "blur(1px)",
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          bottom: "-2%",
-          left: flip ? "40%" : "-6%",
-          width: "70%",
-          height: "22%",
-          opacity: 0.4,
-          background: mid,
-          clipPath: "polygon(0 100%, 0 55%, 18% 30%, 31% 58%, 45% 10%, 58% 50%, 74% 22%, 88% 56%, 100% 40%, 100% 100%)",
-          filter: "blur(2px)",
-        }}
-      />
-    </div>
+    <div className="environment-art" style={{ backgroundImage: `url("${environment.image}")` }} />
   );
 }
 
 export default function Reader({ poem }: { poem: Poem }) {
   const [exp, setExp] = useState<ExperienceData | null>(null);
   const [active, setActive] = useState(0);
+  const [sceneOverrides, setSceneOverrides] = useState<Partial<Record<number, SceneEnvironmentId>>>({});
+  const [showIllustrations, setShowIllustrations] = useState(true);
   const [speaking, setSpeaking] = useState(false);
   const [settings, setSettings] = useState<NarrationSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
@@ -75,6 +37,9 @@ export default function Reader({ poem }: { poem: Poem }) {
   const [notice, setNotice] = useState<string | null>(null);
   const voices = useVoices();
   const stopRef = useRef(false);
+  const narrationRunRef = useRef(0);
+  const previewRunRef = useRef(0);
+  const speechDoneRef = useRef<(() => void) | null>(null);
   const sectionRefs = useRef<(HTMLElement | null)[]>([]);
   const settingsRef = useRef(settings);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
@@ -141,11 +106,20 @@ export default function Reader({ poem }: { poem: Poem }) {
   }, [exp]);
 
   useEffect(() => {
+    const narrationRun = narrationRunRef;
+    const previewRun = previewRunRef;
+    const urls = ttsMemo.current;
     return () => {
       stopRef.current = true;
+      // 卸载时让仍在等待网络请求的朗读和试听失效。
+      narrationRun.current++;
+      previewRun.current++;
+      speechDoneRef.current?.();
       if ("speechSynthesis" in window) speechSynthesis.cancel();
       audioRef.current?.pause();
       ambientMusic.stop();
+      for (const url of urls.values()) URL.revokeObjectURL(url);
+      urls.clear();
     };
   }, []);
 
@@ -165,6 +139,8 @@ export default function Reader({ poem }: { poem: Poem }) {
 
   const stopAll = useCallback(() => {
     stopRef.current = true;
+    narrationRunRef.current++;
+    speechDoneRef.current?.();
     if ("speechSynthesis" in window) speechSynthesis.cancel();
     audioRef.current?.pause();
     audioRef.current = null;
@@ -194,22 +170,29 @@ export default function Reader({ poem }: { poem: Poem }) {
     return url;
   }, []);
 
-  const playEdge = useCallback(async (text: string) => {
+  const playEdge = useCallback(async (text: string, runId: number) => {
     const url = await synthUrl(text, settingsRef.current.edgeVoice);
+    if (stopRef.current || narrationRunRef.current !== runId) return;
     const audio = new Audio(url); // 语速/音调已在服务端合成
     audioRef.current = audio;
     audio.onplay = () => ambientMusic.setDuck(true);
     await new Promise<void>((resolve) => {
-      audio.onended = () => resolve();
-      audio.onerror = () => resolve();
-      audio.play().catch(() => resolve());
+      const finish = () => {
+        if (speechDoneRef.current === finish) speechDoneRef.current = null;
+        resolve();
+      };
+      speechDoneRef.current = finish;
+      audio.onended = finish;
+      audio.onerror = finish;
+      audio.play().catch(finish);
     });
-    audioRef.current = null;
+    if (audioRef.current === audio) audioRef.current = null;
   }, [synthUrl]);
 
-  const speakBrowser = useCallback((text: string) => {
+  const speakBrowser = useCallback((text: string, runId?: number) => {
     return new Promise<void>((resolve) => {
       if (!("speechSynthesis" in window)) return resolve();
+      if (runId !== undefined && (stopRef.current || narrationRunRef.current !== runId)) return resolve();
       const s = settingsRef.current;
       const u = new SpeechSynthesisUtterance(text);
       u.lang = "zh-CN";
@@ -218,8 +201,13 @@ export default function Reader({ poem }: { poem: Poem }) {
       const voice = window.speechSynthesis.getVoices().find((v) => v.voiceURI === s.voiceURI);
       if (voice) u.voice = voice;
       u.onstart = () => ambientMusic.setDuck(true);
-      u.onend = () => resolve();
-      u.onerror = () => resolve();
+      const finish = () => {
+        if (speechDoneRef.current === finish) speechDoneRef.current = null;
+        resolve();
+      };
+      speechDoneRef.current = finish;
+      u.onend = finish;
+      u.onerror = finish;
       speechSynthesis.cancel();
       speechSynthesis.speak(u);
     });
@@ -240,38 +228,43 @@ export default function Reader({ poem }: { poem: Poem }) {
       return;
     }
     stopRef.current = false;
+    const runId = ++narrationRunRef.current;
     setSpeaking(true);
     ensureMusic();
     // 先念诗名与作者，再进入诗句
     const announce = `《${poem.title}》，${poem.author}。`;
     try {
-      if (settingsRef.current.edgeVoice) await playEdge(announce);
-      else await speakBrowser(announce);
+      if (settingsRef.current.edgeVoice) await playEdge(announce, runId);
+      else await speakBrowser(announce, runId);
     } catch { /* 朗读开场白失败不阻塞正文 */ }
+    if (stopRef.current || narrationRunRef.current !== runId) return;
     ambientMusic.setDuck(false);
     const scenes = exp.scenes;
     for (let i = 0; i < scenes.length; i++) {
-      if (stopRef.current) break;
+      if (stopRef.current || narrationRunRef.current !== runId) break;
       const s = scenes[i];
       setActive(i);
       sectionRefs.current[i]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
       const text = s.lines.join("。");
       const useEdge = Boolean(settingsRef.current.edgeVoice);
       try {
-        if (useEdge) await playEdge(text);
-        else await speakBrowser(text);
+        if (useEdge) await playEdge(text, runId);
+        else await speakBrowser(text, runId);
       } catch (e) {
         if (useEdge) {
           flashNotice(`Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），本幕改用浏览器语音。`);
-          await speakBrowser(text);
+          await speakBrowser(text, runId);
         }
       }
+      if (stopRef.current || narrationRunRef.current !== runId) return;
       ambientMusic.setDuck(false);
       if (!stopRef.current && i < scenes.length - 1) {
         await new Promise((r) => setTimeout(r, 600));
+        if (stopRef.current || narrationRunRef.current !== runId) return;
         if (settingsRef.current.edgeVoice) synthUrl(scenes[i + 1].lines.join("。"), settingsRef.current.edgeVoice).catch(() => void 0);
       }
     }
+    if (stopRef.current || narrationRunRef.current !== runId) return;
     if (!soloRef.current) ambientMusic.stop();
     setSpeaking(false);
   }, [exp, speaking, stopAll, ensureMusic, speakBrowser, playEdge, flashNotice, synthUrl, poem]);
@@ -293,6 +286,8 @@ export default function Reader({ poem }: { poem: Poem }) {
   // 试听当前设置
   const preview = useCallback(async () => {
     if (previewing) {
+      previewRunRef.current++;
+      speechDoneRef.current?.();
       speechSynthesis.cancel();
       audioRef.current?.pause();
       audioRef.current = null;
@@ -300,11 +295,13 @@ export default function Reader({ poem }: { poem: Poem }) {
       setPreviewing(false);
       return;
     }
+    const runId = ++previewRunRef.current;
     setPreviewing(true);
     ensureMusic();
     const text = "明月几时有，把酒问青天。";
     const finish = () => {
       setTimeout(() => {
+        if (previewRunRef.current !== runId) return;
         if (!soloRef.current) ambientMusic.stop();
         setPreviewing(false);
       }, 900);
@@ -312,6 +309,7 @@ export default function Reader({ poem }: { poem: Poem }) {
     if (settingsRef.current.edgeVoice) {
       try {
         const url = await synthUrl(text, settingsRef.current.edgeVoice);
+        if (previewRunRef.current !== runId) return;
         const audio = new Audio(url);
         audioRef.current = audio;
         audio.onplay = () => ambientMusic.setDuck(true);
@@ -320,10 +318,12 @@ export default function Reader({ poem }: { poem: Poem }) {
         await audio.play();
         return;
       } catch (e) {
+        if (previewRunRef.current !== runId) return;
         flashNotice(`Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），试听改用浏览器语音。`);
       }
     }
     await speakBrowser(text);
+    if (previewRunRef.current !== runId) return;
     finish();
   }, [previewing, ensureMusic, synthUrl, speakBrowser, flashNotice]);
 
@@ -412,8 +412,21 @@ export default function Reader({ poem }: { poem: Poem }) {
     }
   }, [exp, clipBusy, musicMood, flashNotice, router]);
 
-  const palette = exp?.visualBible.palette.css ?? ["#0a1a24", "#28505c", "#cfd8e3"];
   const scenes = exp?.scenes ?? [];
+  const automaticEnvironments = scenes.map((scene) => matchSceneEnvironment(scene.text, poem.title, poem.tags));
+  const sceneEnvironments = scenes.map((scene, index) => {
+    const selected = sceneOverrides[scene.index];
+    return selected ? environmentById(selected) : automaticEnvironments[index];
+  });
+  const selectEnvironment = (index: number, value: string) => {
+    setSceneOverrides((previous) => {
+      const next = { ...previous };
+      if (value === "auto") delete next[index];
+      else next[index] = value as SceneEnvironmentId;
+      return next;
+    });
+    setShowIllustrations(false);
+  };
   const moodName = exp ? moodForPoem(exp.visualBible.palette.zh, exp.visualBible.mood).name : "";
 
   return (
@@ -422,8 +435,8 @@ export default function Reader({ poem }: { poem: Poem }) {
       <div className="stage" aria-hidden>
         {scenes.map((s) => (
           <div key={s.index} className={`stage-layer${active === s.index ? " active" : ""}`}>
-            <ProceduralScene palette={palette} index={s.index} />
-            {exp?.images[s.index]?.status === "ready" && (
+            <EnvironmentScene environment={sceneEnvironments[s.index]} />
+            {showIllustrations && exp?.images[s.index]?.status === "ready" && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 className={`stage-img ${s.index % 2 === 0 ? "kb-a" : "kb-b"}`}
@@ -605,8 +618,8 @@ export default function Reader({ poem }: { poem: Poem }) {
         </div>
       )}
       {clipBusy && <div className="ai-note">{clipStage ?? "短片合成中"} · 完成后自动前往影片馆</div>}
-      {exp && exp.mode === "fallback" && <div className="ai-note">未配置 AI 配图 · 展示程序化水墨意境</div>}
-      {exp && exp.mode === 'ai' && exp.aiProgress.done < exp.aiProgress.total && !exp.images.some(i => i.status === 'pending') && <div className="ai-note">部分配图未能生成 · 展示程序化水墨意境</div>}
+      {exp && exp.mode === "fallback" && <div className="ai-note">未配置 AI 配图 · 展示写实风格诗境画面</div>}
+      {exp && exp.mode === 'ai' && exp.aiProgress.done < exp.aiProgress.total && !exp.images.some(i => i.status === 'pending') && <div className="ai-note">部分配图未能生成 · 展示写实风格诗境画面</div>}
       {notice && <div className="ai-note warn" role="alert">{notice}</div>}
 
       <div className="scene-wrap">
@@ -619,7 +632,7 @@ export default function Reader({ poem }: { poem: Poem }) {
           )}
           <h1>{poem.title}</h1>
           {!exp && notice && <div className="scene-lines">{poem.lines.map((line, i) => <p key={i}>{line}</p>)}</div>}
-          <p className="ai-disclaimer">译文与配图由 AI 生成，仅供欣赏参考。</p>
+          <p className="ai-disclaimer">场景依据诗句意象匹配；AI 译文与配图仅供欣赏参考。</p>
           <p className="meta">
             {poem.dynasty} · {poem.author}
           </p>
@@ -629,6 +642,29 @@ export default function Reader({ poem }: { poem: Poem }) {
               <span className="bible-chip">{exp.visualBible.mood}</span>
               <span className="bible-chip">色调 · {exp.visualBible.palette.zh}</span>
               {exp.visualBible.imagerySummary && <span className="bible-chip">意象 · {exp.visualBible.imagerySummary}</span>}
+            </div>
+          )}
+          {scenes.length > 0 && (
+            <div className="journey-preview">
+              <div className="journey-heading">
+                <span>这一首的诗境路线</span>
+                <small>{scenes.length} 幕 · 点击进入</small>
+              </div>
+              <div className="journey-list">
+                {scenes.map((scene) => (
+                  <button
+                    key={scene.index}
+                    className="journey-stop"
+                    style={{ backgroundImage: `linear-gradient(180deg, rgba(4, 12, 15, 0.42), rgba(4, 12, 15, 0.9)), url("${sceneEnvironments[scene.index].image}")` }}
+                    onClick={() => sectionRefs.current[scene.index]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })}
+                    aria-label={`进入第 ${scene.index + 1} 幕：${sceneEnvironments[scene.index].name}`}
+                  >
+                    <span>{String(scene.index + 1).padStart(2, "0")}</span>
+                    <strong>{sceneEnvironments[scene.index].name}</strong>
+                    <small>{scene.lines[0]}</small>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           <div className="scroll-hint">向下滚动 · 步入诗境 ↓</div>
@@ -649,6 +685,7 @@ export default function Reader({ poem }: { poem: Poem }) {
                 <span className="cap">
                   幕 {s.index + 1} / {scenes.length}
                 </span>
+                <span className="scene-setting-name">{sceneEnvironments[s.index].name}</span>
               </div>
               <div className="scene-lines">
                 {s.lines.map((line, li) => (
@@ -657,6 +694,31 @@ export default function Reader({ poem }: { poem: Poem }) {
                   </span>
                 ))}
               </div>
+              <div className="scene-environment-info">
+                <span className="scene-environment-kicker">此幕画面 · {sceneOverrides[s.index] ? "手动选择" : "诗句匹配"}</span>
+                <strong>{sceneEnvironments[s.index].atmosphere}</strong>
+                <p>{sceneEnvironments[s.index].description}</p>
+              </div>
+              <div className="scene-environment-controls">
+                <label htmlFor={`scene-environment-${s.index}`}>切换环境</label>
+                <select
+                  id={`scene-environment-${s.index}`}
+                  value={sceneOverrides[s.index] ?? "auto"}
+                  onChange={(event) => selectEnvironment(s.index, event.target.value)}
+                >
+                  <option value="auto">自动匹配 · {automaticEnvironments[s.index].name}</option>
+                  {SCENE_ENVIRONMENTS.map((environment) => (
+                    <option key={environment.id} value={environment.id}>{environment.name}</option>
+                  ))}
+                </select>
+                {exp?.images[s.index]?.status === "ready" && (
+                  <div className="scene-visual-toggle" role="group" aria-label={`第 ${s.index + 1} 幕画面来源`}>
+                    <button className={!showIllustrations ? "selected" : ""} aria-pressed={!showIllustrations} onClick={() => setShowIllustrations(false)}>意境画面</button>
+                    <button className={showIllustrations ? "selected" : ""} aria-pressed={showIllustrations} onClick={() => setShowIllustrations(true)}>AI 配图</button>
+                  </div>
+                )}
+              </div>
+              {exp?.images[s.index]?.status === "ready" && <p className="scene-export-note">切换只影响阅读画面；生成短片仍使用 AI 配图。</p>}
               {s.imagery.length > 0 && (
                 <div className="scene-imagery">
                   {s.imagery.map((img) => (
