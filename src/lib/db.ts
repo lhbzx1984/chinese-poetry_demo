@@ -10,7 +10,8 @@ let metaCache: MetaInfo | null = null;
 export function getDb(): DatabaseSync {
   if (db) return db;
   const dbPath = process.env.POETRY_DB_PATH || path.join(process.cwd(), "data", "poetry.db");
-  if (!fs.existsSync(dbPath)) {
+  // 数据由运行时挂载，不应把数据库或自定义路径打包进构建产物。
+  if (!fs.existsSync(/* turbopackIgnore: true */ dbPath)) {
     throw new Error("诗词数据库尚未构建：请先运行 npm run build:db");
   }
   db = new DatabaseSync(dbPath, { readOnly: true });

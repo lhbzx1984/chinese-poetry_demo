@@ -8,7 +8,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ data: listVideos() });
+  try { return NextResponse.json({ data: listVideos() }); }
+  catch { return NextResponse.json({ error: '影片列表暂不可用，请联系站点管理员。' }, { status: 503 }); }
 }
 
 export async function POST(request: Request) {

@@ -49,6 +49,8 @@ chinese-poetry JSON ──npm run build:db──▶ data/poetry.db
 
 地图资料在 `src/data/poet-places.ts`；分镜与意象在 `src/lib/scenes.ts`、`imagery.ts`；配图、赏析、配乐、短片分别在 `imagegen.ts`、`analysis.ts`、`ambient-music.ts`、`clip.ts`。题材由 `scripts/tag-lexicon.mjs` 关键词规则生成，FTS5 trigram用于中文短语检索。
 
+分镜缓存位于 `data/generated/{id}_scenes2_{内容哈希}/`，图像与赏析共用版本。升级保留旧目录供备份，但不混用旧幕序号；首次访问会重新生成并消耗额度，图片URL也包含版本参数。
+
 三个底图均使用：`china3d.json` 为主地图，`world.json` 为背景，`china.json` 为南海诸岛小窗。GeoJSON缓存一天并允许陈旧重验证，Next启用压缩；反代还应启用gzip/Brotli。
 
 ## 快速开始

@@ -20,10 +20,11 @@ function ensureDir() {
 export function listVideos(): VideoMeta[] {
   ensureDir();
   const out: VideoMeta[] = [];
-  for (const f of fs.readdirSync(DIR)) {
+  for (const f of fs.readdirSync(/* turbopackIgnore: true */ DIR)) {
     if (!f.endsWith(".json")) continue;
     try {
-      out.push(JSON.parse(fs.readFileSync(path.join(DIR, f), "utf8")) as VideoMeta);
+      // 影片属于运行时持久数据，不应跟随服务构建打包。
+      out.push(JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ path.join(/* turbopackIgnore: true */ DIR, f), "utf8")) as VideoMeta);
     } catch { /* 跳过损坏条目 */ }
   }
   out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -63,6 +64,6 @@ export function saveVideo(title: string, author: string, duration: number, bytes
 export function deleteVideo(id: string) {
   ensureDir();
   for (const suffix of [".webm", ".json"]) {
-    try { fs.rmSync(path.join(DIR, id + suffix), { force: true }); } catch { /* 忽略 */ }
+    try { fs.rmSync(path.join(/* turbopackIgnore: true */ DIR, id + suffix), { force: true }); } catch { /* 忽略 */ }
   }
 }
