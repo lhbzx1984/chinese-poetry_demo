@@ -1,173 +1,184 @@
 "use client";
-
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-
-// 挂灯式诗篇：一列列名句从顶部垂下，如树上挂的灯，随风轻摆、光在字间流动
-const VERSES: { text: string; poet: string; left: string; size: number; dur: number; delay: number }[] = [
-  { text: "海内存知己，天涯若比邻。", poet: "王勃", left: "3.5%", size: 15, dur: 7.4, delay: 0 },
-  { text: "孤帆远影碧空尽，唯见长江天际流。", poet: "李白", left: "10.5%", size: 13, dur: 6.8, delay: 1.2 },
-  { text: "春江潮水连海平，海上明月共潮生。", poet: "张若虚", left: "17.5%", size: 14, dur: 8.2, delay: 0.6 },
-  { text: "会当凌绝顶，一览众山小。", poet: "杜甫", left: "24.5%", size: 16, dur: 7.1, delay: 1.8 },
-  { text: "路漫漫其修远兮，吾将上下而求索。", poet: "屈原", left: "31.5%", size: 12, dur: 6.4, delay: 0.3 },
-  { text: "采菊东篱下，悠然见南山。", poet: "陶渊明", left: "63.5%", size: 14, dur: 7.8, delay: 0.9 },
-  { text: "大漠孤烟直，长河落日圆。", poet: "王维", left: "70.5%", size: 17, dur: 6.9, delay: 1.5 },
-  { text: "但愿人长久，千里共婵娟。", poet: "苏轼", left: "77.5%", size: 15, dur: 8.4, delay: 0.4 },
-  { text: "人生自古谁无死，留取丹心照汗青。", poet: "文天祥", left: "84.5%", size: 13, dur: 7.2, delay: 2.1 },
-  { text: "疏影横斜水清浅，暗香浮动月黄昏。", poet: "林逋", left: "91%", size: 13, dur: 6.6, delay: 1.0 },
-  { text: "两情若是久长时，又岂在朝朝暮暮。", poet: "秦观", left: "38.5%", size: 12, dur: 7.6, delay: 2.4 },
-  { text: "落霞与孤鹜齐飞，秋水共长天一色。", poet: "王勃", left: "45.5%", size: 12, dur: 6.2, delay: 1.7 },
-  { text: "身无彩凤双飞翼，心有灵犀一点通。", poet: "李商隐", left: "52.5%", size: 12, dur: 7.0, delay: 0.8 },
-  { text: "近乡情更怯，不敢问来人。", poet: "宋之问", left: "58.5%", size: 12, dur: 6.6, delay: 2.0 },
+import { useAudio } from "./audio-controller";
+import { Seal } from "./ui/seal";
+import { Icon } from "./ui/icons";
+const VERSES = [
+  ["海内存知己，天涯若比邻。", "王勃"],
+  ["孤帆远影碧空尽。", "李白"],
+  ["春江潮水连海平。", "张若虚"],
+  ["会当凌绝顶，一览众山小。", "杜甫"],
+  ["采菊东篱下，悠然见南山。", "陶渊明"],
+  ["大漠孤烟直，长河落日圆。", "王维"],
+  ["但愿人长久，千里共婵娟。", "苏轼"],
 ];
-
-function HeroVerses() {
-  return (
-    <div className="hero-verses" aria-hidden>
-      {VERSES.map((v, i) => (
-        <span
-          key={i}
-          className="verse-float"
-          style={{
-            left: v.left,
-            fontSize: v.size,
-            height: `${46 + (i % 4) * 4}vh`,
-          }}
-        >
-          <span className="verse-window">
-            <span
-              className="verse-scroll"
-              style={{
-                animationDuration: `${v.dur * 1.9}s`,
-                animationDelay: `${-i * 3.7}s`,
-              }}
-            >
-              <span className="verse-text">{v.text}</span>
-              <span className="verse-text">{v.text}</span>
-              <span className="verse-text">{v.text}</span>
-              <span className="verse-text">{v.text}</span>
-              <span className="verse-text">{v.text}</span>
-              <span className="verse-text">{v.text}</span>
-            </span>
-          </span>
-          <span className="verse-poet">{v.poet}</span>
-        </span>
-      ))}
-    </div>
-  );
-}
-
-const subscribeMedia = (callback: () => void) => {
-  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const connection = (navigator as Navigator & { connection?: EventTarget }).connection;
-  motion.addEventListener('change', callback);
-  connection?.addEventListener('change', callback);
-  return () => { motion.removeEventListener('change', callback); connection?.removeEventListener('change', callback); };
+const subscribe = (callback: () => void) => {
+  const media = window.matchMedia("(prefers-reduced-motion:reduce)"),
+    connection = (navigator as Navigator & { connection?: EventTarget })
+      .connection;
+  media.addEventListener("change", callback);
+  connection?.addEventListener("change", callback);
+  return () => {
+    media.removeEventListener("change", callback);
+    connection?.removeEventListener("change", callback);
+  };
 };
-const mediaAllowed = () => !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !(navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
-
-export default function HomeHero() {
-  const router = useRouter();
-  const [meta, setMeta] = useState<{ total: number; dynasties: { name: string; count: number }[] } | null>(null);
-  const [videoOk, setVideoOk] = useState(true);
-  const mounted = useSyncExternalStore(subscribeMedia, mediaAllowed, () => false);
-  const [error, setError] = useState<string | null>(null);
-  const [jumping, setJumping] = useState(false);
-
-  // 视频等媒体元素在水合完成后再渲染：部分浏览器扩展（如字幕类）会在水合前往
-  // 媒体容器注入 DOM，导致服务端/客户端 HTML 不匹配（plasmo-csui SubtitleDiv 等）
-
-
+const allowed = () =>
+  !window.matchMedia("(prefers-reduced-motion:reduce)").matches &&
+  !(navigator as Navigator & { connection?: { saveData?: boolean } }).connection
+    ?.saveData;
+const POSTER =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 900'%3E%3Cpath fill='%230b1417' d='M0 0h1600v900H0z'/%3E%3Cpath fill='%231a2e2c' d='m0 900 420-540 300 320 390-530 490 750Z'/%3E%3C/svg%3E";
+export default function HomeHero({
+  videoAvailable = false,
+}: {
+  videoAvailable?: boolean;
+}) {
+  const router = useRouter(),
+    audio = useAudio(),
+    hero = useRef<HTMLElement>(null),
+    video = useRef<HTMLVideoElement>(null);
+  const canPlay = useSyncExternalStore(subscribe, allowed, () => false),
+    [videoOk, setVideoOk] = useState(true),
+    [total, setTotal] = useState<number | null>(null),
+    [jumping, setJumping] = useState(false),
+    [error, setError] = useState("");
   useEffect(() => {
-    fetch("/api/meta")
-      .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "书库暂不可用。"); return d; })
-      .then((d) => d && setMeta(d.data))
-      .catch((e) => setError(e instanceof Error ? e.message : "书库暂不可用。"));
+    const ctrl = new AbortController();
+    fetch("/api/meta", { signal: ctrl.signal })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.data) setTotal(d.data.total);
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
   }, []);
-
-  // 视频加载失败（含文件缺失）→ 立即切换程序化水墨背景
-  function onVideoError() {
-    setVideoOk(false);
-  }
-
+  useEffect(() => {
+    const element = hero.current,
+      player = video.current;
+    if (!element || !player) return;
+    let visible = true;
+    const sync = () => {
+      if (visible && !document.hidden && canPlay)
+        void player.play().catch(() => {});
+      else player.pause();
+    };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        visible = entries[0].isIntersecting;
+        sync();
+      },
+      { threshold: 0.05 },
+    );
+    observer.observe(element);
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      observer.disconnect();
+      document.removeEventListener("visibilitychange", sync);
+      player.pause();
+    };
+  }, [canPlay, videoAvailable, videoOk]);
   async function randomEntry() {
     setJumping(true);
+    audio.playSfx("chime");
     try {
       const r = await fetch("/api/poems/random");
       const d = await r.json();
-      if (!r.ok || !d.data?.id) throw new Error(d.error || "当前没有可用诗词。");
+      if (!r.ok || !d.data?.id) throw new Error(d.error || "暂时没有可用诗词");
       router.push(`/read/${d.data.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "随机选诗失败。");
+      setError(e instanceof Error ? e.message : "暂时无法入境，请稍后重试。");
     } finally {
       setJumping(false);
     }
   }
-
   return (
-    <header className="cinema" id="top">
-      <div className={`cinema-bg${videoOk ? "" : " fallback"}`} aria-hidden suppressHydrationWarning>
-        {mounted && videoOk && (
+    <section className="cinema" id="top" ref={hero} aria-label="步入诗境">
+      <div className="cinema-bg" aria-hidden>
+        {videoAvailable && canPlay && videoOk && (
           <video
+            ref={video}
             className="cinema-video"
             src="/media/hero-landscape.mp4"
-            autoPlay
+            poster={POSTER}
             muted
-            loop
             playsInline
-            preload="auto"
-            onError={onVideoError}
+            loop
+            preload="metadata"
+            onError={() => setVideoOk(false)}
           />
         )}
       </div>
       <div className="cinema-scrim" aria-hidden />
-      <HeroVerses />
-
-      <nav className="topbar cinema-topbar">
-        <Link href="/" className="brand">
-          诗境
-          <small>SHI JING · IMMERSIVE</small>
-        </Link>
-        <div className="navlinks-row">
-          <Link className="chip" href="/library">
-            书库
-          </Link>
-          <Link className="chip" href="/video">
-            影片馆
-          </Link>
-        </div>
-      </nav>
-
+      <div className="hero-verses">
+        {VERSES.map(([text, poet], i) => (
+          <button
+            key={poet}
+            className="verse-column"
+            style={{ animationDelay: `-${i * 3}s` }}
+            aria-label={`${poet}：${text}`}
+            onPointerEnter={() => {
+              if (window.matchMedia("(hover:hover)").matches)
+                audio.playSfx("pluck", {
+                  note: [0, 2, 4, 7, 9, 12, 14][i],
+                  volume: 0.5,
+                });
+            }}
+            onFocus={() => audio.playSfx("pluck", { note: i * 2, volume: 0.5 })}
+            onClick={() => audio.playSfx("pluck", { note: i * 2 })}
+          >
+            <span>{text}</span>
+            <span className="verse-poet">{poet}</span>
+          </button>
+        ))}
+      </div>
       <div className="cinema-content">
-        <div className="cinema-eyebrow">Immersive Classical Chinese Poetry</div>
-        <h1 className="cinema-title">诗境</h1>
+        <p className="cinema-eyebrow">山河为卷 · 诗意成境</p>
+        <div className="cinema-title-row">
+          <h1 className="cinema-title ink-bleed">诗境</h1>
+          <Seal>山河</Seal>
+        </div>
         <p className="cinema-sub">
-          {meta ? (
-            <>
-              <b>{meta.total.toLocaleString()}</b> 首古典诗词 ·{" "}
-              {meta.dynasties.slice(0, 6).map((d) => d.name).join(" / ")} · 每一首都被拆成电影分镜，
-              每一位诗人都有他走过的山河。
-            </>
-          ) : (
-            "每一首诗都是一场可以步入的电影，每一位诗人都有他走过的山河。"
-          )}
+          越过千年烟水，
+          <br />
+          与一首诗，悄然相逢。
         </p>
-        {error && <p role="alert">{error}</p>}
+        <p className="cinema-meta">
+          {total ? total.toLocaleString() + " 首诗词 · " : ""}
+          循诗人足迹，听山河回响
+        </p>
         <div className="cinema-cta">
-          <a className="cta primary" href="#map">
-            ◈ 步入诗人地图
+          <a
+            className="cta primary"
+            href="#map"
+            onClick={() => audio.playSfx("knock")}
+          >
+            <Icon name="map" />
+            步入山河
           </a>
-          <Link className="cta" href="/library">
-            ≡ 漫游书库
+          <Link
+            className="cta"
+            href="/library"
+            prefetch={false}
+            onClick={() => audio.playSfx("ink")}
+          >
+            <Icon name="library" />
+            漫游书库
           </Link>
-          <button className="cta" onClick={randomEntry} disabled={jumping}>
-            {jumping ? "正在入梦…" : "❋ 任入一境"}
+          <button
+            className="cta"
+            onClick={() => void randomEntry()}
+            disabled={jumping}
+          >
+            <Icon name="shuffle" />
+            {jumping ? "正在入境" : "任入一境"}
           </button>
         </div>
+        {error && <p role="alert">{error}</p>}
       </div>
-
-      <div className="scroll-hint cinema-scroll">向下滚动 · 打开千年山河 ↓</div>
-    </header>
+      <div className="cinema-scroll">往下，遇见另一重诗意 ↓</div>
+    </section>
   );
 }
