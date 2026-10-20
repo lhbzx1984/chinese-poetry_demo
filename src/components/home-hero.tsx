@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -58,22 +58,32 @@ function HeroVerses() {
   );
 }
 
+const subscribeMedia = (callback: () => void) => {
+  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const connection = (navigator as Navigator & { connection?: EventTarget }).connection;
+  motion.addEventListener('change', callback);
+  connection?.addEventListener('change', callback);
+  return () => { motion.removeEventListener('change', callback); connection?.removeEventListener('change', callback); };
+};
+const mediaAllowed = () => !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !(navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
+
 export default function HomeHero() {
   const router = useRouter();
   const [meta, setMeta] = useState<{ total: number; dynasties: { name: string; count: number }[] } | null>(null);
   const [videoOk, setVideoOk] = useState(true);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeMedia, mediaAllowed, () => false);
+  const [error, setError] = useState<string | null>(null);
   const [jumping, setJumping] = useState(false);
 
   // 视频等媒体元素在水合完成后再渲染：部分浏览器扩展（如字幕类）会在水合前往
   // 媒体容器注入 DOM，导致服务端/客户端 HTML 不匹配（plasmo-csui SubtitleDiv 等）
-  useEffect(() => setMounted(true), []);
+
 
   useEffect(() => {
     fetch("/api/meta")
-      .then((r) => (r.ok ? r.json() : null))
+      .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "书库暂不可用。"); return d; })
       .then((d) => d && setMeta(d.data))
-      .catch(() => void 0);
+      .catch((e) => setError(e instanceof Error ? e.message : "书库暂不可用。"));
   }, []);
 
   // 视频加载失败（含文件缺失）→ 立即切换程序化水墨背景
@@ -86,7 +96,10 @@ export default function HomeHero() {
     try {
       const r = await fetch("/api/poems/random");
       const d = await r.json();
-      if (d.data?.id) router.push(`/read/${d.data.id}`);
+      if (!r.ok || !d.data?.id) throw new Error(d.error || "当前没有可用诗词。");
+      router.push(`/read/${d.data.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "随机选诗失败。");
     } finally {
       setJumping(false);
     }
@@ -140,6 +153,7 @@ export default function HomeHero() {
             "每一首诗都是一场可以步入的电影，每一位诗人都有他走过的山河。"
           )}
         </p>
+        {error && <p role="alert">{error}</p>}
         <div className="cinema-cta">
           <a className="cta primary" href="#map">
             ◈ 步入诗人地图

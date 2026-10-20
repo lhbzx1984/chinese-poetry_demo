@@ -88,6 +88,10 @@ async function requestAnalysis(poem: Poem, scenes: Scene[]): Promise<PoemAnalysi
   return parsed;
 }
 
+export function needsAnalysis(poem: Poem): boolean {
+  return textConfig().enabled && !inflight.has(poem.id) && !readAnalysis(poem);
+}
+
 export function ensureAnalysis(poem: Poem): void {
   const { enabled } = textConfig();
   if (!enabled || inflight.has(poem.id) || readAnalysis(poem)) return;

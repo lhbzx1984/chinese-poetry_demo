@@ -1,19 +1,25 @@
 {
   "name": "shijing-immersive",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "build:db": "node scripts/build-db.mjs"
+    "build:db": "node scripts/build-db.mjs",
+    "pretypecheck": "next typegen",
+    "typecheck": "tsc --noEmit",
+    "stats": "node scripts/stats.mjs",
+    "check:data": "node scripts/check-poet-coverage.mjs",
+    "test": "node --test",
+    "hero:video": "node --env-file-if-exists=.env.local scripts/fetch-hero-video.mjs"
   },
   "dependencies": {
     "echarts": "^5.4.3",
     "echarts-gl": "^2.1.0",
     "msedge-tts": "^2.0.8",
-    "next": "16.3.5",
+    "next": "16.4.2",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
@@ -23,9 +29,19 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.5",
+    "eslint-config-next": "16.4.2",
     "opencc-js": "^1.4.2",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "description": "诗境 · 中国古典诗词沉浸馆",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lhbzx1984/chinese-poetry_demo.git"
   }
 }

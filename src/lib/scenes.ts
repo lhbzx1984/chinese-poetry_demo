@@ -1,4 +1,4 @@
-// 分镜引擎：把一首诗切分成 5-8 个电影感场景，并为每个场景生成统一视觉规范下的画面提示词。
+// 分镜引擎：一般切分成 3-6 幕，短文本保留实际句数，不重复或杜撰诗句。
 // 参考 immersive-poetry-page skill 的思路：文学分镜 → 视觉圣经 → 逐场景画面。
 // 全部为确定性规则，不依赖大模型；大模型只负责锦上添花的译文与赏析（见 analysis.ts）。
 import type { Poem, Scene } from "./types";
@@ -45,8 +45,8 @@ function splitSentences(lines: string[]): string[] {
   const out: string[] = [];
   for (const line of lines) {
     // 按 。！？； 切句，保留标点
-    const parts = line.split(/(?<=[。！？；!?;])/).map((s) => s.trim()).filter(Boolean);
-    if (parts.length === 0) out.push(line);
+    const parts = line.split(/(?<=[，。！？；,!?;])/).map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0 && line.trim()) out.push(line);
     else out.push(...parts);
   }
   return out;
@@ -96,7 +96,9 @@ export function buildScenes(poem: Poem): { bible: VisualBible; scenes: Scene[] }
     groups = poem.lines.map((l) => [l]);
   } else {
     const sentences = splitSentences(poem.lines);
-    if (sentences.length <= MAX_SCENES) {
+    if (sentences.length === 8) {
+      groups = chunk(sentences, 4);
+    } else if (sentences.length <= MAX_SCENES) {
       groups = sentences.map((s) => [s]);
     } else {
       const target = Math.max(MIN_SCENES, Math.min(MAX_SCENES, Math.ceil(sentences.length / 4)));

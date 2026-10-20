@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* 键盘导航、窄屏与系统减少动态效果偏好。 */
+:focus-visible { outline: 2px solid #e3c76e; outline-offset: 4px; }
+.ai-disclaimer { color: #e3c76e; font-size: 14px; line-height: 1.8; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
 :root {
   --ink: #f5efdc;
   --ink-dim: #cfc7ae;
@@ -504,4 +511,20 @@ input[type="file"].set-input::file-selector-button {
   .dots { display: none; }
   .filter-bar { top: 61px; }
   .reader-title { display: none; }
+}
+
+/* 控件在手机上可换行，长文本不撑破容器。 */
+.ai-note { color: #eee4cc; max-width: calc(100vw - 28px); overflow-wrap: anywhere; }
+.set-note { color: #cfc7ae; }
+@media (max-width: 640px) {
+  .topbar, .reader-top, .reader-actions, .navlinks-row { flex-wrap: wrap; }
+  .topbar, .reader-top { gap: 10px; }
+  .author-select, .filter-row, .map-head, .map-wrap, .poet-card { min-width: 0; max-width: 100%; }
+  .author-select { width: 100%; }
+  .chip, .ghost-btn, .pop-close { min-height: 44px; }
+  .poem-grid { grid-template-columns: minmax(0, 1fr); }
+  .pager { gap: 6px; }
+  .pager .page-btn { padding: 9px 12px; letter-spacing: 0; }
+  .cinema-eyebrow { letter-spacing: 0.14em; }
+  .poet-card { width: calc(100% - 24px); right: 12px; }
 }

@@ -1,4 +1,4 @@
-// 提供缓存的场景配图（目录按内容寻址，兼容旧版纯 id 目录）
+// 提供缓存的场景配图（目录按当前分镜内容寻址）
 import fs from "node:fs";
 import path from "node:path";
 import { dirForId } from "@/lib/imagegen";

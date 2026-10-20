@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const DIR = path.join(process.cwd(), "data", "videos");
+const DIR = process.env.VIDEOS_DIR || path.join(process.cwd(), "data", "videos");
 
 export type VideoMeta = {
   id: string;
@@ -20,10 +20,11 @@ function ensureDir() {
 export function listVideos(): VideoMeta[] {
   ensureDir();
   const out: VideoMeta[] = [];
-  for (const f of fs.readdirSync(DIR)) {
+  for (const f of fs.readdirSync(/* turbopackIgnore: true */ DIR)) {
     if (!f.endsWith(".json")) continue;
     try {
-      out.push(JSON.parse(fs.readFileSync(path.join(DIR, f), "utf8")) as VideoMeta);
+      // 影片属于运行时持久数据，不应跟随服务构建打包。
+      out.push(JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ path.join(/* turbopackIgnore: true */ DIR, f), "utf8")) as VideoMeta);
     } catch { /* 跳过损坏条目 */ }
   }
   out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -47,9 +48,9 @@ export function saveVideo(title: string, author: string, duration: number, bytes
   const id = "v" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const meta: VideoMeta = {
     id,
-    title: title.slice(0, 60) || "无题",
-    author: author.slice(0, 30) || "佚名",
-    duration,
+    title: title.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 60) || "无题",
+    author: author.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 30) || "佚名",
+    duration: Number.isFinite(duration) ? Math.max(0, Math.min(600, duration)) : 0,
     bytes: bytes.length,
     createdAt: new Date().toISOString(),
   };
@@ -63,6 +64,6 @@ export function saveVideo(title: string, author: string, duration: number, bytes
 export function deleteVideo(id: string) {
   ensureDir();
   for (const suffix of [".webm", ".json"]) {
-    try { fs.rmSync(path.join(DIR, id + suffix), { force: true }); } catch { /* 忽略 */ }
+    try { fs.rmSync(path.join(/* turbopackIgnore: true */ DIR, id + suffix), { force: true }); } catch { /* 忽略 */ }
   }
 }

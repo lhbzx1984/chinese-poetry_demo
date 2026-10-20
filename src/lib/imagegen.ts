@@ -1,5 +1,5 @@
 // 场景配图：调用 OpenAI 兼容的 images/generations 端点，逐场景生成电影感画面。
-// 产物缓存在 data/generated/{id}_{内容哈希}/{index}.jpg —— 磁盘是唯一事实来源，
+// 产物缓存在 data/generated/{id}_scenes2_{内容哈希}/{index}.jpg —— 磁盘是唯一事实来源，
 // 同一首诗只有第一次访问会生成，之后全部直接命中缓存（不消耗任何生成额度）；
 // 未配置 key 或生成失败时前端使用程序化水墨背景兜底。
 import crypto from "node:crypto";
@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Poem } from "./types";
 import { buildScenes, scenePrompt } from "./scenes";
+import { getPoem } from "./db";
 
 export const GENERATED_DIR = path.join(process.cwd(), "data", "generated");
 
@@ -20,32 +21,25 @@ export function imageConfig() {
   return { key, base, model, size, enabled: Boolean(key) };
 }
 
-// 内容寻址：诗的内容（标题/作者/正文）决定缓存目录，数据库重建导致 id 变化也不失效
+// 缓存按诗词身份与分镜正文寻址；规则改变会失效，避免幕序号错配。
 function contentHash(poem: Poem): string {
   return crypto
     .createHash("sha1")
-    .update(`${poem.id}|${poem.title}|${poem.author}|${poem.lines.join("|")}`)
+    .update(JSON.stringify([poem.id, poem.title, poem.author, poem.dynasty, poem.collection, buildScenes(poem).scenes.map(s => s.text)]))
     .digest("hex")
     .slice(0, 10);
 }
 
-function legacyDir(poemId: number): string {
-  return path.join(GENERATED_DIR, String(poemId));
-}
-
 export function poemDirOf(poem: Poem): string {
-  const legacy = legacyDir(poem.id);
-  if (fs.existsSync(legacy)) return legacy;
-  return path.join(GENERATED_DIR, `${poem.id}_${contentHash(poem)}`);
+  // 分镜规则升级后不能按旧幕序号复用图片和译文；旧目录保留供备份。
+  return path.join(GENERATED_DIR, `${poem.id}_scenes2_${contentHash(poem)}`);
 }
 
 // 图片服务路由用：只知道 id 时定位缓存目录
 export function dirForId(poemId: number): string | null {
-  const legacy = legacyDir(poemId);
-  if (fs.existsSync(legacy)) return legacy;
   try {
-    const hit = fs.readdirSync(GENERATED_DIR).find((d) => d.startsWith(`${poemId}_`));
-    return hit ? path.join(GENERATED_DIR, hit) : null;
+    const poem = getPoem(poemId);
+    return poem ? poemDirOf(poem) : null;
   } catch {
     return null;
   }
@@ -69,7 +63,7 @@ export function imageStatuses(poem: Poem, sceneCount: number) {
     out.push({
       index: i,
       status: ok ? "ready" as const : running ? "pending" as const : "idle" as const,
-      url: ok ? `/api/images/${poem.id}/${i}` : null,
+      url: ok ? `/api/images/${poem.id}/${i}?v=scenes2_${contentHash(poem)}` : null,
     });
   }
   return { list: out, ready, running };
@@ -119,6 +113,10 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
     active--;
     waiters.shift()?.();
   }
+}
+
+export function needsImages(poem: Poem): boolean {
+  return imageConfig().enabled && !inflight.has(poem.id) && buildScenes(poem).scenes.some(s => !hasImage(poem, s.index) && (failedRounds.get(`${poem.id}:${s.index}`) ?? 0) < 2);
 }
 
 export function ensureImages(poem: Poem): void {

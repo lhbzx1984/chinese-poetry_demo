@@ -4,19 +4,24 @@
 import { NextResponse } from "next/server";
 import { getPoem } from "@/lib/db";
 import { buildScenes } from "@/lib/scenes";
-import { ensureImages, imageStatuses, imageConfig } from "@/lib/imagegen";
-import { ensureAnalysis, readAnalysis, textConfig } from "@/lib/analysis";
+import { ensureImages, imageStatuses, imageConfig, needsImages } from "@/lib/imagegen";
+import { ensureAnalysis, readAnalysis, textConfig, needsAnalysis } from "@/lib/analysis";
+import { limitRequest } from "@/lib/rate-limit";
 import type { ExperienceData } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, context: RouteContext<"/api/poems/[id]/experience">) {
+export async function GET(request: Request, context: RouteContext<"/api/poems/[id]/experience">) {
   const { id } = await context.params;
-  const poem = getPoem(Number(id));
-  if (!poem) return NextResponse.json({ error: "没有找到这首诗。" }, { status: 404 });
-
   try {
+    if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0) return NextResponse.json({ error: '诗词编号无效。' }, { status: 400 });
+    const poem = getPoem(Number(id));
+    if (!poem) return NextResponse.json({ error: "没有找到这首诗。" }, { status: 404 });
+    if (needsImages(poem) || needsAnalysis(poem)) {
+      const limited = limitRequest(request, 'AI', 10);
+      if (limited) return limited;
+    }
     const { bible, scenes } = buildScenes(poem);
     // 进入时先快照一次：若所有配图早已在磁盘上，本次访问零生成
     const before = imageStatuses(poem, scenes.length);

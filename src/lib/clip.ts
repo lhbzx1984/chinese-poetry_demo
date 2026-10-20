@@ -63,6 +63,7 @@ export async function generatePoemClip(opts: ClipOptions): Promise<{ blob: Blob;
 
 async function generatePoemClipInner(opts: ClipOptions): Promise<{ blob: Blob; total: number }> {
   const { exp, musicStream, narrations, images } = opts;
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) {
     throw new Error("当前浏览器不支持视频录制，请用 Chrome / Edge。");
@@ -157,11 +158,11 @@ async function generatePoemClipInner(opts: ClipOptions): Promise<{ blob: Blob; t
           idx = i;
           local = 1;
         }
-        const zoom = idx % 2 === 0 ? 1.02 + local * 0.09 : 1.11 - local * 0.09;
+        const zoom = reducedMotion ? 1 : idx % 2 === 0 ? 1.02 + local * 0.09 : 1.11 - local * 0.09;
         drawCover(ctx, images[idx], zoom);
         drawScrim(ctx);
 
-        if (idx + 1 < images.length && local > 1 - FADE / durations[idx]) {
+        if (!reducedMotion && idx + 1 < images.length && local > 1 - FADE / durations[idx]) {
           const k = (local - (1 - FADE / durations[idx])) / (FADE / durations[idx]);
           ctx.save();
           ctx.globalAlpha = Math.min(1, k);

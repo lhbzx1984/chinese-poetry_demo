@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import type { AuthorInfo, MetaInfo, PoemListResult } from "@/lib/types";
 
 const PAGE_SIZE = 24;
 
 export default function Library() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [meta, setMeta] = useState<MetaInfo | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
@@ -93,8 +94,8 @@ export default function Library() {
 
   useEffect(() => {
     const ctrl = new AbortController();
-    fetchPoems(ctrl.signal);
-    return () => ctrl.abort();
+    const timer = setTimeout(() => void fetchPoems(ctrl.signal), 0);
+    return () => { clearTimeout(timer); ctrl.abort(); };
   }, [fetchPoems]);
 
   function changeFilter(apply: () => void) {
@@ -110,7 +111,10 @@ export default function Library() {
       if (tag) params.set("tag", tag);
       const r = await fetch(`/api/poems/random?${params}`);
       const d = await r.json();
-      if (d.data?.id) window.location.href = `/read/${d.data.id}`;
+      if (!r.ok || !d.data?.id) throw new Error(d.error || "当前筛选下没有诗词。");
+      router.push(`/read/${d.data.id}`);
+    } catch (e) {
+      setListError(e instanceof Error ? e.message : "随机选诗失败。");
     } finally {
       setJumping(false);
     }
@@ -186,6 +190,7 @@ export default function Library() {
         <div className="filter-row">
           <span className="filter-label">作者</span>
           <select
+            aria-label="按作者筛选"
             className="author-select"
             value={author}
             onChange={(e) => changeFilter(() => setAuthor(e.target.value))}
@@ -198,6 +203,7 @@ export default function Library() {
             ))}
           </select>
           <input
+            aria-label="搜索标题、作者或诗句"
             className="search-input"
             placeholder="搜标题、作者或诗句…"
             value={qInput}

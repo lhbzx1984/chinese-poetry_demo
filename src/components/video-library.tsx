@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { adminFetch } from "@/lib/admin-client";
 
 type VideoMeta = {
   id: string;
@@ -21,6 +22,7 @@ function fmtSize(bytes: number) {
 }
 
 export default function VideoLibrary() {
+  const [error, setError] = useState<string | null>(null);
   const [videos, setVideos] = useState<VideoMeta[] | null>(null);
   const [active, setActive] = useState<VideoMeta | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -29,21 +31,27 @@ export default function VideoLibrary() {
     try {
       const r = await fetch("/api/videos");
       if (r.ok) setVideos((await r.json()).data);
-      else setVideos([]);
-    } catch {
+      else throw new Error((await r.json()).error || "影片载入失败。");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "影片载入失败。");
       setVideos([]);
     }
   }, []);
 
   useEffect(() => {
-    void load();
+    const timer = setTimeout(() => void load(), 0);
+    return () => clearTimeout(timer);
   }, [load]);
 
   async function remove(id: string) {
-    await fetch(`/api/videos/${id}`, { method: "DELETE" });
-    setConfirmId(null);
-    if (active?.id === id) setActive(null);
-    void load();
+    try {
+      const r = await adminFetch(`/api/videos/${id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error((await r.json()).error || "删除失败。");
+      setError(null);
+      setConfirmId(null);
+      if (active?.id === id) setActive(null);
+      void load();
+    } catch (e) { setError(e instanceof Error ? e.message : "删除失败。"); }
   }
 
   return (
@@ -71,6 +79,7 @@ export default function VideoLibrary() {
       </section>
 
       <section className="video-list">
+        {error && <p role="alert">{error}</p>}
         {videos === null ? (
           <div className="status-line">影片载入中…</div>
         ) : videos.length === 0 ? (

@@ -10,7 +10,8 @@ let metaCache: MetaInfo | null = null;
 export function getDb(): DatabaseSync {
   if (db) return db;
   const dbPath = process.env.POETRY_DB_PATH || path.join(process.cwd(), "data", "poetry.db");
-  if (!fs.existsSync(dbPath)) {
+  // 数据由运行时挂载，不应把数据库或自定义路径打包进构建产物。
+  if (!fs.existsSync(/* turbopackIgnore: true */ dbPath)) {
     throw new Error("诗词数据库尚未构建：请先运行 npm run build:db");
   }
   db = new DatabaseSync(dbPath, { readOnly: true });
@@ -54,8 +55,8 @@ function likeEscape(s: string) {
 
 export function listPoems(filters: PoemFilters): PoemListResult {
   const database = getDb();
-  const page = Math.max(1, filters.page ?? 1);
-  const pageSize = Math.min(60, Math.max(1, filters.pageSize ?? 20));
+  const page = Number.isSafeInteger(filters.page) ? Math.max(1, Math.min(1_000_000, filters.page!)) : 1;
+  const pageSize = Number.isSafeInteger(filters.pageSize) ? Math.min(60, Math.max(1, filters.pageSize!)) : 20;
   const where: string[] = [];
   const params: (string | number)[] = [];
 
@@ -112,7 +113,7 @@ export function listAuthors(opts: { dynasty?: string; q?: string; limit?: number
   if (opts.dynasty) { where.push("dynasty = ?"); params.push(opts.dynasty); }
   const q = (opts.q ?? "").trim();
   if (q) { where.push("name LIKE ? ESCAPE '\\'"); params.push(`%${likeEscape(q)}%`); }
-  const limit = Math.min(200, Math.max(1, opts.limit ?? 50));
+  const limit = Number.isSafeInteger(opts.limit) ? Math.min(200, Math.max(1, opts.limit!)) : 50;
   const rows = getDb()
     .prepare(
       `SELECT name, dynasty, poem_count FROM authors
