@@ -109,7 +109,9 @@ export default function MapExplorer() {
   const [poems, setPoems] = useState<PoemSummary[] | null>(null);
   const [autoTour, setAutoTour] = useState(true);
   const autoTourRef = useRef(true);
-  autoTourRef.current = autoTour;
+  useEffect(() => { autoTourRef.current = autoTour; }, [autoTour]);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [poemError, setPoemError] = useState<string | null>(null);
 
   const activePoets = dynasty ? POET_PLACES.filter((p) => p.dynasty === dynasty) : POET_PLACES;
 
@@ -179,7 +181,7 @@ export default function MapExplorer() {
             alpha: 42,
             beta: 0,
             distance: 88,
-            autoRotate: true,
+            autoRotate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
             autoRotateSpeed: 0.45,
             minDistance: 42,
             maxDistance: 150,
@@ -201,12 +203,19 @@ export default function MapExplorer() {
 
   // 初始化（仅客户端）：地图 + 暗色世界底图 + 南海诸岛小窗
   useEffect(() => {
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updateMotion = () => {
+      setAutoTour(false);
+      chartRef.current?.setOption({ geo3D: { viewControl: { autoRotate: false } } });
+    };
+    motion.addEventListener("change", updateMotion);
     let disposed = false;
     let chart: import("echarts").ECharts | null = null;
     (async () => {
       const echarts = await import("echarts");
       await import("echarts-gl");
       const chinaRes = await fetch("/geo/china3d.json");
+      if (!chinaRes.ok) throw new Error("地图底图载入失败，请稍后刷新。");
       const chinaJson = (await chinaRes.json()) as unknown as Parameters<typeof echarts.registerMap>[1];
       if (disposed || !boxRef.current) return;
       echarts.registerMap("china3d", chinaJson);
@@ -233,6 +242,7 @@ export default function MapExplorer() {
         const poet = POET_PLACES.find((p) => p.name === datum.poet);
         if (poet) setSel(poet);
       });
+      setAutoTour(!motion.matches);
       setReady(true);
       if (typeof window !== "undefined") {
         (window as unknown as Record<string, unknown>).__shijingMap = chart;
@@ -268,13 +278,14 @@ export default function MapExplorer() {
           });
         } catch { /* 小窗失败可忽略 */ }
       }
-    })();
+    })().catch(() => { if (!disposed) setMapError("地图载入失败，请使用下方诗人名录浏览作品。"); });
     const onResize = () => {
       chartRef.current?.resize();
     };
     window.addEventListener("resize", onResize);
     return () => {
       disposed = true;
+      motion.removeEventListener("change", updateMotion);
       window.removeEventListener("resize", onResize);
       chart?.dispose();
       chartRef.current = null;
@@ -301,23 +312,26 @@ export default function MapExplorer() {
   // 作者卡：代表作优先
   useEffect(() => {
     if (!sel) return;
-    setPoems(null);
     let cancelled = false;
     (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      setPoems(null);
+      setPoemError(null);
       const found: PoemSummary[] = [];
       const seen = new Set<number>();
       const grab = async (params: string) => {
         try {
           const r = await fetch(`/api/poems?${params}`);
-          if (!r.ok) return;
           const d = await r.json();
+          if (!r.ok) throw new Error(d.error || "书库检索失败。");
           for (const p of (d.data.items ?? []) as PoemSummary[]) {
             if (!seen.has(p.id)) {
               seen.add(p.id);
               found.push(p);
             }
           }
-        } catch { /* 忽略 */ }
+        } catch (e) { if (!cancelled) setPoemError(e instanceof Error ? e.message : "书库检索失败。"); }
       };
       for (const kw of sel.famous.slice(0, 5)) {
         if (cancelled) return;
@@ -344,7 +358,7 @@ export default function MapExplorer() {
             沿着 {POET_PLACES.length} 位诗人的一生，看他们走过的 {spotCount} 处山河。点亮一个光点，走近一个人的一生。
           </p>
         </div>
-        <div className="timeline" role="tablist" aria-label="按朝代筛选">
+        <div className="timeline" role="group" aria-label="按朝代筛选">
           <button className={`chip${dynasty === "" ? " active" : ""}`} onClick={() => setDynasty("")}>
             全部
           </button>
@@ -362,7 +376,7 @@ export default function MapExplorer() {
             className={`chip${autoTour ? " active" : ""}`}
             title="自动旋转巡游；拖动或点击地图会暂停"
             onClick={() => {
-              const next = !autoTour;
+              const next = !autoTour && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
               setAutoTour(next);
               chartRef.current?.setOption({ geo3D: { viewControl: { autoRotate: next } } });
             }}
@@ -375,7 +389,7 @@ export default function MapExplorer() {
       <div className="map-wrap">
         <div className="map-box tech" ref={boxRef} aria-label="诗人行迹 3D 中国地图" />
         <div className="southsea-inset" ref={insetRef} aria-label="南海诸岛" />
-        {!ready && <div className="map-loading">山河载入中…</div>}
+        {!ready && <div className="map-loading" role="status">{mapError || "山河载入中…"}</div>}
 
         {sel && (
           <div className="poet-card" role="dialog" aria-label={`${sel.name}介绍`}>
@@ -399,7 +413,7 @@ export default function MapExplorer() {
             </div>
             <div className="poet-poems">
               <div className="label">书库中的作品</div>
-              {poems === null ? (
+              {poemError ? <p role="alert">{poemError}</p> : poems === null ? (
                 <p className="dim">检索中…</p>
               ) : poems.length ? (
                 <ul>
@@ -419,7 +433,7 @@ export default function MapExplorer() {
               ) : (
                 <p className="dim">
                   书库暂未收录其作品，
-                  <Link href={`/library?dynasty=${encodeURIComponent(sel.dynasty)}`}>看看同时代的作品 →</Link>
+                  <Link href="/library">浏览书库已收录作品 →</Link>
                 </p>
               )}
             </div>

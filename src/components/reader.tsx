@@ -77,13 +77,16 @@ export default function Reader({ poem }: { poem: Poem }) {
   const stopRef = useRef(false);
   const sectionRefs = useRef<(HTMLElement | null)[]>([]);
   const settingsRef = useRef(settings);
-  settingsRef.current = settings;
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
   const soloRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsMemo = useRef(new Map<string, string>());
 
   // 朗读偏好本机记忆
-  useEffect(() => setSettings(loadNarrationSettings()), []);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setSettings(loadNarrationSettings()));
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const update = useCallback((patch: Partial<NarrationSettings>) => {
     setSettings((prev) => {
       const next = { ...prev, ...patch };
@@ -104,9 +107,12 @@ export default function Reader({ poem }: { poem: Poem }) {
         if (r.ok) {
           setExp(d.data);
           if (!d.settled) timer = setTimeout(poll, 3000);
+        } else {
+          setNotice(d.error || "诗境载入失败，请刷新重试。");
+          if (r.status === 429) timer = setTimeout(poll, Math.max(1, Number(r.headers.get("Retry-After")) || 60) * 1000);
         }
       } catch {
-        if (!stop) timer = setTimeout(poll, 5000);
+        if (!stop) setNotice("网络连接失败，请刷新后重试。");
       }
     }
     poll();
@@ -132,7 +138,7 @@ export default function Reader({ poem }: { poem: Poem }) {
     );
     for (const el of sectionRefs.current) if (el) observer.observe(el);
     return () => observer.disconnect();
-  }, [exp?.scenes.length]);
+  }, [exp]);
 
   useEffect(() => {
     return () => {
@@ -248,7 +254,7 @@ export default function Reader({ poem }: { poem: Poem }) {
       if (stopRef.current) break;
       const s = scenes[i];
       setActive(i);
-      sectionRefs.current[i]?.scrollIntoView({ behavior: "smooth", block: "start" });
+      sectionRefs.current[i]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
       const text = s.lines.join("。");
       const useEdge = Boolean(settingsRef.current.edgeVoice);
       try {
@@ -340,6 +346,7 @@ export default function Reader({ poem }: { poem: Poem }) {
       const rate = settingsRef.current.rate;
       const narrations: { sceneIndex: number; mp3: ArrayBuffer }[] = [];
       let ttsOk = true;
+      let ttsError = '';
       // 片头旁白：诗名与作者
       setClipStage("合成片头旁白…");
       try {
@@ -348,10 +355,11 @@ export default function Reader({ poem }: { poem: Poem }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: `《${exp.poem.title}》，${exp.poem.author}。`, voice, pitch, rate }),
         });
-        if (!r.ok) throw new Error(await r.text().catch(() => ""));
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '旁白合成失败。');
         narrations.push({ sceneIndex: -1, mp3: await r.arrayBuffer() });
-      } catch {
+      } catch (e) {
         ttsOk = false;
+        ttsError = e instanceof Error ? e.message : '旁白合成失败。';
       }
       for (let i = 0; i < exp.scenes.length; i++) {
         setClipStage(`合成旁白 ${i + 1}/${exp.scenes.length}…`);
@@ -361,13 +369,14 @@ export default function Reader({ poem }: { poem: Poem }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text: exp.scenes[i].lines.join("。"), voice, pitch, rate }),
           });
-          if (!r.ok) throw new Error(await r.text().catch(() => ""));
+          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '旁白合成失败。');
           narrations.push({ sceneIndex: i, mp3: await r.arrayBuffer() });
-        } catch {
+        } catch (e) {
           ttsOk = false; // 单幕失败：该幕静音，继续生成
+          ttsError = e instanceof Error ? e.message : '旁白合成失败。';
         }
       }
-      if (!ttsOk) flashNotice("部分旁白合成失败，短片中对应幕将只有配乐。");
+      if (!ttsOk) flashNotice(`${ttsError} 部分旁白合成失败，对应幕将只有配乐。`);
 
       // 2) 启动意境配乐（其实时流将作为一条音轨混入）
       const s = settingsRef.current;
@@ -436,7 +445,7 @@ export default function Reader({ poem }: { poem: Poem }) {
         </span>
         <span className="reader-actions">
           {exp && exp.mode === "ai" && exp.images.length > 0 && exp.images.every((i) => i.status === "ready") && (
-            <button className="ghost-btn" onClick={() => void makeClip()} disabled={clipBusy} title="用已生成的分镜画面合成 15 秒短片">
+            <button className="ghost-btn" onClick={() => void makeClip()} disabled={clipBusy} title="用分镜画面、旁白与配乐合成短片">
               {clipBusy ? clipStage ?? "● 合成中…" : "🎬 生成短片"}
             </button>
           )}
@@ -454,7 +463,7 @@ export default function Reader({ poem }: { poem: Poem }) {
           <div className="set-title">朗读设置</div>
           <div className="set-row">
             <label>朗读音色</label>
-            <select value={settings.edgeVoice} onChange={(e) => update({ edgeVoice: e.target.value })}>
+            <select aria-label="朗读音色" value={settings.edgeVoice} onChange={(e) => update({ edgeVoice: e.target.value })}>
               <optgroup label="Edge 在线神经语音（自然流畅 · 需联网）">
                 {EDGE_VOICES.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -475,7 +484,7 @@ export default function Reader({ poem }: { poem: Poem }) {
             <>
               <div className="set-row">
                 <label>系统声音</label>
-                <select value={settings.voiceURI} onChange={(e) => update({ voiceURI: e.target.value })}>
+                <select aria-label="系统声音" value={settings.voiceURI} onChange={(e) => update({ voiceURI: e.target.value })}>
                   <option value="">系统默认{voices.length ? `（共 ${voices.length} 个中文语音）` : ""}</option>
                   {voices.map((v) => (
                     <option key={v.voiceURI} value={v.voiceURI}>
@@ -508,7 +517,7 @@ export default function Reader({ poem }: { poem: Poem }) {
             <label>语速 {settings.rate.toFixed(2)}×</label>
             <input
               type="range" min={0.6} max={1.2} step={0.05}
-              value={settings.rate}
+              aria-label="语速" value={settings.rate}
               onChange={(e) => update({ rate: Number(e.target.value) })}
             />
           </div>
@@ -516,7 +525,7 @@ export default function Reader({ poem }: { poem: Poem }) {
             <label>音调 {settings.pitch.toFixed(2)}</label>
             <input
               type="range" min={0.8} max={1.15} step={0.05}
-              value={settings.pitch}
+              aria-label="音调" value={settings.pitch}
               onChange={(e) => update({ pitch: Number(e.target.value) })}
             />
           </div>
@@ -537,7 +546,7 @@ export default function Reader({ poem }: { poem: Poem }) {
           </div>
           <div className="set-row">
             <label>配乐意境</label>
-            <select value={settings.musicMood} onChange={(e) => update({ musicMood: e.target.value })}>
+            <select aria-label="配乐意境" value={settings.musicMood} onChange={(e) => update({ musicMood: e.target.value })}>
               <option value="">自动 · 随诗匹配</option>
               {ALL_MOOD_NAMES.map((n) => (
                 <option key={n} value={n}>
@@ -550,7 +559,7 @@ export default function Reader({ poem }: { poem: Poem }) {
             <label>乐声 {Math.round(settings.musicVolume * 100)}%</label>
             <input
               type="range" min={0} max={1} step={0.05}
-              value={settings.musicVolume}
+              aria-label="乐声音量" value={settings.musicVolume}
               onChange={(e) => {
                 update({ musicVolume: Number(e.target.value) });
                 ambientMusic.setVolume(Number(e.target.value));
@@ -573,19 +582,19 @@ export default function Reader({ poem }: { poem: Poem }) {
       )}
 
       {scenes.length > 1 && (
-        <div className="dots" aria-hidden>
+        <div className="dots" aria-label="场景导航">
           {scenes.map((s) => (
             <button
               key={s.index}
               className={`dot${active === s.index ? " active" : ""}`}
-              title={`第 ${s.index + 1} 幕`}
-              onClick={() => sectionRefs.current[s.index]?.scrollIntoView({ behavior: "smooth" })}
+              aria-label={`跳转至第 ${s.index + 1} 幕`}
+              onClick={() => sectionRefs.current[s.index]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })}
             />
           ))}
         </div>
       )}
 
-      {exp && exp.mode === "ai" && exp.aiProgress.done < exp.aiProgress.total && (
+      {exp && exp.mode === "ai" && exp.aiProgress.done < exp.aiProgress.total && exp.images.some(i => i.status === 'pending') && (
         <div className="ai-note">
           分镜画面绘制中 {exp.aiProgress.done}/{exp.aiProgress.total} · 完成后自动淡入
         </div>
@@ -597,7 +606,8 @@ export default function Reader({ poem }: { poem: Poem }) {
       )}
       {clipBusy && <div className="ai-note">{clipStage ?? "短片合成中"} · 完成后自动前往影片馆</div>}
       {exp && exp.mode === "fallback" && <div className="ai-note">未配置 AI 配图 · 展示程序化水墨意境</div>}
-      {notice && <div className="ai-note warn">{notice}</div>}
+      {exp && exp.mode === 'ai' && exp.aiProgress.done < exp.aiProgress.total && !exp.images.some(i => i.status === 'pending') && <div className="ai-note">部分配图未能生成 · 展示程序化水墨意境</div>}
+      {notice && <div className="ai-note warn" role="alert">{notice}</div>}
 
       <div className="scene-wrap">
         <section className="title-block">
@@ -608,6 +618,8 @@ export default function Reader({ poem }: { poem: Poem }) {
             </p>
           )}
           <h1>{poem.title}</h1>
+          {!exp && notice && <div className="scene-lines">{poem.lines.map((line, i) => <p key={i}>{line}</p>)}</div>}
+          <p className="ai-disclaimer">译文与配图由 AI 生成，仅供欣赏参考。</p>
           <p className="meta">
             {poem.dynasty} · {poem.author}
           </p>
@@ -664,6 +676,7 @@ export default function Reader({ poem }: { poem: Poem }) {
         ))}
 
         <section className="finale">
+          <a href="https://github.com/chinese-poetry/chinese-poetry">诗词数据：chinese-poetry（MIT）</a>
           <div className="end-mark">全诗终</div>
           <p>
             《{poem.title}》 · {poem.dynasty} · {poem.author}
