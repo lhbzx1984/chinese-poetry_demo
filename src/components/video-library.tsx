@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Icon } from "@/components/ui/icons";
 import { adminFetch } from "@/lib/admin-client";
 
 type VideoMeta = {
@@ -19,45 +18,7 @@ function fmtDur(sec: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 function fmtSize(bytes: number) {
-  return bytes > 1048576
-    ? `${(bytes / 1048576).toFixed(1)} MB`
-    : `${Math.round(bytes / 1024)} KB`;
-}
-
-function VideoPoster({ id, duration }: { id: string; duration: number }) {
-  const ref = useRef<HTMLSpanElement>(null),
-    [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return (
-    <span className="video-poster" ref={ref}>
-      {visible && (
-        <video
-          preload="metadata"
-          muted
-          playsInline
-          aria-hidden="true"
-          tabIndex={-1}
-          src={`/api/videos/${id}#t=0.1`}
-        />
-      )}
-      <span className="duration-badge">{fmtDur(duration)}</span>
-      <Icon name="play" />
-    </span>
-  );
+  return bytes > 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
 }
 
 export default function VideoLibrary() {
@@ -65,14 +26,6 @@ export default function VideoLibrary() {
   const [videos, setVideos] = useState<VideoMeta[] | null>(null);
   const [active, setActive] = useState<VideoMeta | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
-
-  const confirmation = useRef<HTMLDialogElement>(null);
-  const [deleting, setDeleting] = useState(false);
-  useEffect(() => {
-    const dialog = confirmation.current;
-    if (confirmId && dialog && !dialog.open) dialog.showModal();
-    else dialog?.close();
-  }, [confirmId]);
 
   const load = useCallback(async () => {
     try {
@@ -91,7 +44,6 @@ export default function VideoLibrary() {
   }, [load]);
 
   async function remove(id: string) {
-    setDeleting(true);
     try {
       const r = await adminFetch(`/api/videos/${id}`, { method: "DELETE" });
       if (!r.ok) throw new Error((await r.json()).error || "删除失败。");
@@ -99,19 +51,30 @@ export default function VideoLibrary() {
       setConfirmId(null);
       if (active?.id === id) setActive(null);
       void load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "删除失败。");
-    } finally {
-      setDeleting(false);
-    }
+    } catch (e) { setError(e instanceof Error ? e.message : "删除失败。"); }
   }
 
   return (
-    <main id="main-content" tabIndex={-1}>
+    <main>
+      <header className="topbar">
+        <Link href="/" className="brand">
+          诗境
+          <small>影片馆 · FILM GALLERY</small>
+        </Link>
+        <div className="navlinks-row">
+          <Link className="chip" href="/library">
+            书库
+          </Link>
+          <Link className="chip" href="/">
+            首页
+          </Link>
+        </div>
+      </header>
+
       <section className="video-hero">
         <h1>影片馆</h1>
         <p>
-          沉浸页里分镜图就绪后点「生成短片」，诗词朗读、意境配乐与画面合成的短片会保存在这里，随时回看与下载。
+          沉浸页里分镜图就绪后点「🎬 生成短片」，诗词朗读、意境配乐与画面合成的短片会保存在这里，随时回看与下载。
         </p>
       </section>
 
@@ -124,48 +87,32 @@ export default function VideoLibrary() {
             还没有影片。
             <br />
             <small>
-              去 <Link href="/">首页</Link>{" "}
-              选一首诗进入沉浸页，分镜画面就绪后点「生成短片」即可创作第一部。
+              去 <Link href="/">首页</Link> 选一首诗进入沉浸页，分镜画面就绪后点「🎬 生成短片」即可创作第一部。
             </small>
           </div>
         ) : (
           <>
             {active ? (
               <div className="player-card">
-                <video
-                  key={active.id}
-                  controls
-                  autoPlay
-                  preload="auto"
-                  src={`/api/videos/${active.id}`}
-                />
+                <video key={active.id} controls autoPlay preload="auto" src={`/api/videos/${active.id}`} />
                 <div className="player-meta">
                   <div>
                     <span className="p-title">《{active.title}》</span>
                     <span className="p-author">
-                      {active.author} · {fmtDur(active.duration)} ·{" "}
-                      {fmtSize(active.bytes)}
+                      {active.author} · {fmtDur(active.duration)} · {fmtSize(active.bytes)}
                     </span>
                   </div>
                   <div className="player-actions">
-                    <a
-                      className="page-btn"
-                      href={`/api/videos/${active.id}`}
-                      download={`诗境·${active.title}·${active.author}.webm`}
-                    >
-                      <Icon name="download" />
-                      下载影片
+                    <a className="page-btn" href={`/api/videos/${active.id}`} download={`诗境·${active.title}·${active.author}.webm`}>
+                      ⬇ 下载影片
                     </a>
                     <button
                       className="page-btn danger"
-                      onClick={() => setConfirmId(active.id)}
+                      onClick={() => (confirmId === active.id ? void remove(active.id) : setConfirmId(active.id))}
                     >
-                      删除影片
+                      {confirmId === active.id ? "再点一次确认删除" : "删除"}
                     </button>
-                    <button
-                      className="page-btn"
-                      onClick={() => setActive(null)}
-                    >
+                    <button className="page-btn" onClick={() => setActive(null)}>
                       收起
                     </button>
                   </div>
@@ -179,49 +126,17 @@ export default function VideoLibrary() {
                   className={`video-card${active?.id === v.id ? " active" : ""}`}
                   onClick={() => setActive(v)}
                 >
-                  <VideoPoster id={v.id} duration={v.duration} />
                   <span className="vc-title">《{v.title}》</span>
                   <span className="vc-author">
                     {v.author} · {fmtDur(v.duration)} · {fmtSize(v.bytes)}
                   </span>
-                  <span className="vc-date">
-                    {new Date(v.createdAt).toLocaleString("zh-CN", {
-                      hour12: false,
-                    })}
-                  </span>
+                  <span className="vc-date">{new Date(v.createdAt).toLocaleString("zh-CN", { hour12: false })}</span>
                 </button>
               ))}
             </div>
           </>
         )}
       </section>
-      <dialog
-        ref={confirmation}
-        className="confirm-dialog"
-        aria-labelledby="delete-title"
-        onCancel={() => setConfirmId(null)}
-      >
-        <h2 id="delete-title">删除这部影片？</h2>
-        <p>影片删除后无法恢复。</p>
-        {error && <p role="alert">{error}</p>}
-        <div className="player-actions">
-          <button
-            className="page-btn"
-            autoFocus
-            disabled={deleting}
-            onClick={() => setConfirmId(null)}
-          >
-            保留影片
-          </button>
-          <button
-            className="page-btn danger"
-            disabled={deleting}
-            onClick={() => confirmId && void remove(confirmId)}
-          >
-            {deleting ? "删除中…" : "确认删除"}
-          </button>
-        </div>
-      </dialog>
     </main>
   );
 }

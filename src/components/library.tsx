@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Seal } from "./ui/seal";
-import { Icon } from "./ui/icons";
 import type { AuthorInfo, MetaInfo, PoemListResult } from "@/lib/types";
 
 const PAGE_SIZE = 24;
@@ -15,10 +13,8 @@ export default function Library() {
   const [meta, setMeta] = useState<MetaInfo | null>(null);
   const [fatal, setFatal] = useState<string | null>(null);
 
-  const [dynasty, setDynasty] = useState(
-    () => searchParams.get("dynasty") ?? "",
-  );
-  const [tag, setTag] = useState(() => searchParams.get("tag") ?? "");
+  const [dynasty, setDynasty] = useState(() => searchParams.get("dynasty") ?? "");
+  const [tag, setTag] = useState("");
   const [author, setAuthor] = useState(() => searchParams.get("author") ?? "");
   const [q, setQ] = useState("");
   const [qInput, setQInput] = useState("");
@@ -40,9 +36,7 @@ export default function Library() {
         if (!r.ok) throw new Error(d.error ?? "加载失败");
         setMeta(d.data);
       })
-      .catch((e) =>
-        setFatal(e instanceof Error ? e.message : "诗词数据不可用"),
-      );
+      .catch((e) => setFatal(e instanceof Error ? e.message : "诗词数据不可用"));
   }, []);
 
   // 搜索词防抖
@@ -95,16 +89,13 @@ export default function Library() {
         if (!signal.aborted) setLoading(false);
       }
     },
-    [dynasty, tag, author, q, page],
+    [dynasty, tag, author, q, page]
   );
 
   useEffect(() => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => void fetchPoems(ctrl.signal), 0);
-    return () => {
-      clearTimeout(timer);
-      ctrl.abort();
-    };
+    return () => { clearTimeout(timer); ctrl.abort(); };
   }, [fetchPoems]);
 
   function changeFilter(apply: () => void) {
@@ -120,8 +111,7 @@ export default function Library() {
       if (tag) params.set("tag", tag);
       const r = await fetch(`/api/poems/random?${params}`);
       const d = await r.json();
-      if (!r.ok || !d.data?.id)
-        throw new Error(d.error || "当前筛选下没有诗词。");
+      if (!r.ok || !d.data?.id) throw new Error(d.error || "当前筛选下没有诗词。");
       router.push(`/read/${d.data.id}`);
     } catch (e) {
       setListError(e instanceof Error ? e.message : "随机选诗失败。");
@@ -132,34 +122,31 @@ export default function Library() {
 
   function goPage(next: number) {
     setPage(next);
-    gridTop.current?.scrollIntoView({
-      behavior: window.matchMedia("(prefers-reduced-motion:reduce)").matches
-        ? "instant"
-        : "smooth",
-      block: "start",
-    });
+    gridTop.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  const totalPages = result
-    ? Math.max(1, Math.ceil(result.total / PAGE_SIZE))
-    : 1;
+  const totalPages = result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : 1;
 
   return (
-    <main id="main-content" tabIndex={-1}>
-      <section className="hero">
-        <span className="section-kicker">沉浸书库 · 藏诗于心</span>
-        <h1 className="hero-title">翻开一卷，遇见山河</h1>
-        <button className="ghost-btn" onClick={randomEntry} disabled={jumping}>
-          <Icon name="shuffle" />
-          {jumping ? "正在入境" : "任入一境"}
+    <main>
+      <header className="topbar">
+        <Link href="/" className="brand">
+          诗境
+          <small>SHI JING · IMMERSIVE</small>
+        </Link>
+        <button className="chip" onClick={randomEntry} disabled={jumping}>
+          {jumping ? "正在入梦…" : "任入一境 · 随机"}
         </button>
+      </header>
+
+      <section className="hero">
+        <h1 className="hero-title">步入一首诗的电影</h1>
         <p className="hero-sub">
           {meta ? (
             <>
-              收录{" "}
-              <span className="hero-num">{meta.total.toLocaleString()}</span>{" "}
-              首古典诗词 · {meta.dynasties.map((d) => d.name).join(" / ")} ·
-              按年代、作者、题材筛选， 每一首都被拆成电影分镜，配以画面与朗读。
+              收录 <span className="hero-num">{meta.total.toLocaleString()}</span> 首古典诗词 ·{" "}
+              {meta.dynasties.map((d) => d.name).join(" / ")} · 按年代、作者、题材筛选，
+              每一首都被拆成电影分镜，配以画面与朗读。
             </>
           ) : (
             "按年代、作者、题材筛选古典诗词，每一首都是一场可以步入的电影。"
@@ -170,19 +157,14 @@ export default function Library() {
       <div className="filter-bar">
         <div className="filter-row">
           <span className="filter-label">年代</span>
-          <button
-            className={`chip${dynasty === "" ? " active" : ""}`}
-            onClick={() => changeFilter(() => setDynasty(""))}
-          >
+          <button className={`chip${dynasty === "" ? " active" : ""}`} onClick={() => changeFilter(() => setDynasty(""))}>
             全部
           </button>
           {meta?.dynasties.map((d) => (
             <button
               key={d.name}
               className={`chip${dynasty === d.name ? " active" : ""}`}
-              onClick={() =>
-                changeFilter(() => setDynasty(dynasty === d.name ? "" : d.name))
-              }
+              onClick={() => changeFilter(() => setDynasty(dynasty === d.name ? "" : d.name))}
               title={`${d.count} 首`}
             >
               {d.name}
@@ -191,19 +173,14 @@ export default function Library() {
         </div>
         <div className="filter-row">
           <span className="filter-label">题材</span>
-          <button
-            className={`chip${tag === "" ? " active" : ""}`}
-            onClick={() => changeFilter(() => setTag(""))}
-          >
+          <button className={`chip${tag === "" ? " active" : ""}`} onClick={() => changeFilter(() => setTag(""))}>
             不限
           </button>
           {meta?.tags.map((t) => (
             <button
               key={t.name}
               className={`chip${tag === t.name ? " active" : ""}`}
-              onClick={() =>
-                changeFilter(() => setTag(tag === t.name ? "" : t.name))
-              }
+              onClick={() => changeFilter(() => setTag(tag === t.name ? "" : t.name))}
               title={`${t.count} 首`}
             >
               {t.name}
@@ -225,16 +202,13 @@ export default function Library() {
               </option>
             ))}
           </select>
-          <div className="search-wrap">
-            <Icon name="search" />
-            <input
-              aria-label="搜索标题、作者或诗句"
-              className="search-input"
-              placeholder="搜标题、作者或诗句…"
-              value={qInput}
-              onChange={(e) => setQInput(e.target.value)}
-            />
-          </div>
+          <input
+            aria-label="搜索标题、作者或诗句"
+            className="search-input"
+            placeholder="搜标题、作者或诗句…"
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
+          />
           {(dynasty || tag || author || q) && (
             <button
               className="chip"
@@ -245,77 +219,36 @@ export default function Library() {
                 setQInput("");
               }}
             >
-              <Icon name="close" /> 清空筛选
+              ✕ 清空筛选
             </button>
           )}
         </div>
       </div>
 
-      <section
-        className="results"
-        ref={gridTop as React.RefObject<HTMLDivElement | null>}
-      >
+      <section className="results" ref={gridTop as React.RefObject<HTMLDivElement | null>}>
         {fatal ? (
           <div className="status-line">
             {fatal}
             <br />
-            <small>
-              请先运行 <code>npm run build:db</code> 构建本地诗词数据库
-            </small>
+            <small>请先运行 <code>npm run build:db</code> 构建本地诗词数据库</small>
           </div>
         ) : (
           <>
             <div className="results-meta">
               <span>
-                {result
-                  ? `共 ${result.total.toLocaleString()} 首${author ? ` · ${author}` : ""}`
-                  : "检索中…"}
+                {result ? `共 ${result.total.toLocaleString()} 首${author ? ` · ${author}` : ""}` : "检索中…"}
               </span>
-              <span>
-                {dynasty || "历代"}
-                {tag ? ` · ${tag}` : ""}
-              </span>
+              <span>{dynasty || "历代"}{tag ? ` · ${tag}` : ""}</span>
             </div>
             {listError ? (
               <div className="status-line">{listError}</div>
-            ) : !loading && result?.items.length === 0 ? (
-              <div className="status-line">
-                <Icon name="mountains" />
-                <h2>此境无诗</h2>
-                <p>换个关键词，或试试另一个朝代。</p>
-                <button
-                  className="page-btn"
-                  onClick={() => {
-                    setQInput("");
-                    setAuthor("");
-                    setTag("");
-                    setDynasty("");
-                    setPage(1);
-                  }}
-                >
-                  重新漫游
-                </button>
-              </div>
             ) : (
               <div className="poem-grid">
                 {loading && !result
-                  ? Array.from({ length: 12 }, (_, i) => (
-                      <div className="skeleton" key={i} />
-                    ))
+                  ? Array.from({ length: 12 }, (_, i) => <div className="skeleton" key={i} />)
                   : result?.items.map((p) => (
-                      <Link
-                        className="poem-card"
-                        href={`/read/${p.id}`}
-                        key={p.id}
-                        prefetch={false}
-                      >
-                        <Seal>{p.author.slice(0, 1)}</Seal>
-                        <span className="poem-title-strip" aria-hidden>
-                          诗卷
-                        </span>
-                        {p.subtitle && (
-                          <span className="rhythmic">{p.subtitle}</span>
-                        )}
+                      <Link className="poem-card" href={`/read/${p.id}`} key={p.id}>
+                        {p.subtitle && <span className="rhythmic">{p.subtitle}</span>}
                         <h3>{p.title}</h3>
                         <span className="byline">
                           {p.dynasty} · {p.author}
@@ -332,21 +265,13 @@ export default function Library() {
             )}
             {result && totalPages > 1 && (
               <div className="pager">
-                <button
-                  className="page-btn"
-                  disabled={page <= 1 || loading}
-                  onClick={() => goPage(page - 1)}
-                >
+                <button className="page-btn" disabled={page <= 1 || loading} onClick={() => goPage(page - 1)}>
                   ‹ 上一页
                 </button>
                 <span className="page-info">
                   {page} / {totalPages}
                 </span>
-                <button
-                  className="page-btn"
-                  disabled={page >= totalPages || loading}
-                  onClick={() => goPage(page + 1)}
-                >
+                <button className="page-btn" disabled={page >= totalPages || loading} onClick={() => goPage(page + 1)}>
                   下一页 ›
                 </button>
               </div>
