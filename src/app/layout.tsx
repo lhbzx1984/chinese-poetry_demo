@@ -1,5 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import localFont from "next/font/local";
 import "./globals.css";
+
+const serif = localFont({ src: '../../../public/fonts/shijing-serif.woff2', variable: '--font-serif', weight: '400', display: 'swap', preload: true });
+const display = localFont({ src: '../../../public/fonts/shijing-display.woff2', variable: '--font-display', weight: '400', display: 'swap', preload: true });
 
 export const metadata: Metadata = {
   title: "诗境 · 中国古典诗词沉浸馆",
@@ -16,7 +20,7 @@ export const viewport: Viewport = { themeColor: "#071318" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" className={`${serif.variable} ${display.variable}`}>
       <body>{children}</body>
     </html>
   );
