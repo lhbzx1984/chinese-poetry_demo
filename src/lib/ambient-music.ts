@@ -3,8 +3,11 @@
 // 按诗的视觉规范自动匹配情绪；朗读时仅温和压低（×0.75），停止即淡出。
 // window.__shijingMusic.level() 可读取实时电平（RMS），便于确认音乐确在发声。
 
+import { audioEngine } from "./audio-engine";
+
 export type MusicMood = {
   name: string;
+  layers?: { stream?: boolean; bell?: boolean; chimes?: boolean };
   root: number; // 主音频率 Hz
   scale: number[]; // 半音阶上的五声音阶
   pluckEvery: [number, number]; // 拨弦间隔秒范围
@@ -14,16 +17,112 @@ export type MusicMood = {
 };
 
 const MOODS: { match: string; mood: MusicMood }[] = [
-  { match: "月夜青蓝", mood: { name: "月夜清泉", root: 146.83, scale: [0, 3, 5, 7, 10], pluckEvery: [2.0, 3.8], wind: 0.14, padGain: 0.1, pluckGain: 0.26 } },
-  { match: "塞外苍黄", mood: { name: "大漠孤烟", root: 98.0, scale: [0, 2, 5, 7, 9], pluckEvery: [2.4, 4.2], wind: 0.45, padGain: 0.12, pluckGain: 0.24 } },
-  { match: "春晓青绿", mood: { name: "春风溪流", root: 164.81, scale: [0, 2, 4, 7, 9], pluckEvery: [1.4, 2.8], wind: 0.1, padGain: 0.09, pluckGain: 0.24 } },
-  { match: "雪夜冷灰", mood: { name: "霜天寥落", root: 130.81, scale: [0, 3, 5, 7, 10], pluckEvery: [2.6, 4.6], wind: 0.24, padGain: 0.09, pluckGain: 0.2 } },
-  { match: "水墨烟白", mood: { name: "空山禅意", root: 130.81, scale: [0, 2, 5, 7, 9], pluckEvery: [2.4, 4.4], wind: 0.12, padGain: 0.1, pluckGain: 0.2 } },
-  { match: "闺阁绛红", mood: { name: "烛影红妆", root: 174.61, scale: [0, 2, 5, 7, 9], pluckEvery: [1.6, 3.0], wind: 0.06, padGain: 0.09, pluckGain: 0.22 } },
-  { match: "宫阙暗金", mood: { name: "宫阙深沉", root: 110.0, scale: [0, 3, 5, 8, 10], pluckEvery: [2.2, 4.0], wind: 0.1, padGain: 0.13, pluckGain: 0.26 } },
-  { match: "秋暮金橙", mood: { name: "秋暮长天", root: 146.83, scale: [0, 2, 5, 7, 9], pluckEvery: [1.8, 3.4], wind: 0.16, padGain: 0.1, pluckGain: 0.22 } },
+  {
+    match: "月夜青蓝",
+    mood: {
+      name: "月夜清泉",
+      root: 146.83,
+      scale: [0, 3, 5, 7, 10],
+      pluckEvery: [2.0, 3.8],
+      wind: 0.14,
+      padGain: 0.1,
+      pluckGain: 0.26,
+    },
+  },
+  {
+    match: "塞外苍黄",
+    mood: {
+      name: "大漠孤烟",
+      root: 98.0,
+      scale: [0, 2, 5, 7, 9],
+      pluckEvery: [2.4, 4.2],
+      wind: 0.45,
+      padGain: 0.12,
+      pluckGain: 0.24,
+    },
+  },
+  {
+    match: "春晓青绿",
+    mood: {
+      name: "春风溪流",
+      root: 164.81,
+      scale: [0, 2, 4, 7, 9],
+      pluckEvery: [1.4, 2.8],
+      wind: 0.1,
+      padGain: 0.09,
+      pluckGain: 0.24,
+    },
+  },
+  {
+    match: "雪夜冷灰",
+    mood: {
+      name: "霜天寥落",
+      root: 130.81,
+      scale: [0, 3, 5, 7, 10],
+      pluckEvery: [2.6, 4.6],
+      wind: 0.24,
+      padGain: 0.09,
+      pluckGain: 0.2,
+    },
+  },
+  {
+    match: "水墨烟白",
+    mood: {
+      name: "空山禅意",
+      root: 130.81,
+      scale: [0, 2, 5, 7, 9],
+      pluckEvery: [2.4, 4.4],
+      wind: 0.12,
+      padGain: 0.1,
+      pluckGain: 0.2,
+    },
+  },
+  {
+    match: "闺阁绛红",
+    mood: {
+      name: "烛影红妆",
+      root: 174.61,
+      scale: [0, 2, 5, 7, 9],
+      pluckEvery: [1.6, 3.0],
+      wind: 0.06,
+      padGain: 0.09,
+      pluckGain: 0.22,
+    },
+  },
+  {
+    match: "宫阙暗金",
+    mood: {
+      name: "宫阙深沉",
+      root: 110.0,
+      scale: [0, 3, 5, 8, 10],
+      pluckEvery: [2.2, 4.0],
+      wind: 0.1,
+      padGain: 0.13,
+      pluckGain: 0.26,
+    },
+  },
+  {
+    match: "秋暮金橙",
+    mood: {
+      name: "秋暮长天",
+      root: 146.83,
+      scale: [0, 2, 5, 7, 9],
+      pluckEvery: [1.8, 3.4],
+      wind: 0.16,
+      padGain: 0.1,
+      pluckGain: 0.22,
+    },
+  },
 ];
-const DEFAULT_MOOD: MusicMood = { name: "山水清音", root: 146.83, scale: [0, 2, 5, 7, 9], pluckEvery: [1.8, 3.6], wind: 0.14, padGain: 0.1, pluckGain: 0.22 };
+const DEFAULT_MOOD: MusicMood = {
+  name: "山水清音",
+  root: 146.83,
+  scale: [0, 2, 5, 7, 9],
+  pluckEvery: [1.8, 3.6],
+  wind: 0.14,
+  padGain: 0.1,
+  pluckGain: 0.22,
+};
 
 export function moodForPoem(paletteZh: string, moodZh: string): MusicMood {
   const hit = MOODS.find((m) => paletteZh.includes(m.match));
@@ -35,14 +134,87 @@ export function moodForPoem(paletteZh: string, moodZh: string): MusicMood {
 
 // 按名称取意境（设置面板手动选择用）
 export function moodByName(name: string): MusicMood | null {
-  return MOODS.find((m) => m.mood.name === name)?.mood ?? (name === DEFAULT_MOOD.name ? DEFAULT_MOOD : null);
+  return (
+    MOODS.find((m) => m.mood.name === name)?.mood ??
+    (name === DEFAULT_MOOD.name ? DEFAULT_MOOD : null)
+  );
 }
-export const ALL_MOOD_NAMES = [...MOODS.map((m) => m.mood.name), DEFAULT_MOOD.name];
+export const ALL_MOOD_NAMES = [
+  ...MOODS.map((m) => m.mood.name),
+  DEFAULT_MOOD.name,
+];
+export const MOOD_META = [
+  {
+    name: "月夜清泉",
+    description: "月白风清，听泉入梦",
+    accent: "#7392ad",
+    genre: "思乡怀人",
+  },
+  {
+    name: "大漠孤烟",
+    description: "长风万里，天地苍茫",
+    accent: "#bb945c",
+    genre: "边塞征战",
+  },
+  {
+    name: "春风溪流",
+    description: "山色初醒，水声正好",
+    accent: "#7fa595",
+    genre: "山水田园",
+  },
+  {
+    name: "霜天寥落",
+    description: "雪落无声，一念澄明",
+    accent: "#a9bbc0",
+    genre: "咏物抒怀",
+  },
+  {
+    name: "空山禅意",
+    description: "空山不语，钟声悠长",
+    accent: "#a9b6a3",
+    genre: "哲理禅意",
+  },
+  {
+    name: "烛影红妆",
+    description: "一灯如豆，半卷相思",
+    accent: "#c47770",
+    genre: "爱情闺怨",
+  },
+  {
+    name: "宫阙深沉",
+    description: "故国烟云，岁月回响",
+    accent: "#b99c65",
+    genre: "咏史怀古",
+  },
+  {
+    name: "秋暮长天",
+    description: "落日与秋水，共一色",
+    accent: "#bc905d",
+    genre: "行旅羁愁",
+  },
+];
+// 朝代采用文学意境映射，不将音乐风格当作历史考证。
+export const DYNASTY_MOOD: Record<string, string> = {
+  先秦: "空山禅意",
+  汉魏: "空山禅意",
+  魏晋: "空山禅意",
+  南北朝: "空山禅意",
+  唐: "春风溪流",
+  五代: "月夜清泉",
+  宋: "月夜清泉",
+  元: "大漠孤烟",
+  明: "秋暮长天",
+  清: "秋暮长天",
+};
 
 const DUCK_FACTOR = 0.75;
 
 // 程序生成混响脉冲响应：指数衰减的立体声噪声
-function makeImpulseResponse(ctx: AudioContext, seconds: number, decay: number): AudioBuffer {
+function makeImpulseResponse(
+  ctx: AudioContext,
+  seconds: number,
+  decay: number,
+): AudioBuffer {
   const rate = ctx.sampleRate;
   const len = Math.floor(rate * seconds);
   const buf = ctx.createBuffer(2, len, rate);
@@ -57,6 +229,7 @@ function makeImpulseResponse(ctx: AudioContext, seconds: number, decay: number):
 
 class AmbientMusic {
   private ctx: AudioContext | null = null;
+  private generation = 0;
   private master: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
   private probe: Uint8Array<ArrayBuffer> | null = null;
@@ -69,8 +242,12 @@ class AmbientMusic {
   private _playing = false;
   private _duck = false;
 
-  get playing() { return this._playing; }
-  get moodName() { return this.mood.name; }
+  get playing() {
+    return this._playing;
+  }
+  get moodName() {
+    return this.mood.name;
+  }
 
   // 供录制短片使用：把当前配乐输出为可录制的音频流（需先 start）
   getCaptureStream(): MediaStream | null {
@@ -121,13 +298,13 @@ class AmbientMusic {
   }
 
   async start(mood: MusicMood) {
-    this.stopNow(0.3);
+    const fade = this._playing ? 2 : 0.3;
+    this.stopNow(fade);
+    const ticket = ++this.generation;
     this.mood = mood;
-    const AC: typeof AudioContext | undefined =
-      window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return;
-    this.ctx = this.ctx ?? new AC();
-    try { await this.ctx.resume(); } catch { /* 某些浏览器需在手势里 resume，narrate/试听 均为点击链路 */ }
+    const shared = await audioEngine.unlock();
+    if (!shared || ticket !== this.generation) return;
+    this.ctx = shared;
     const ctx = this.ctx;
     this.master = ctx.createGain();
     this.master.gain.value = 0;
@@ -135,7 +312,7 @@ class AmbientMusic {
     this.analyser.fftSize = 512;
     this.probe = new Uint8Array(new ArrayBuffer(this.analyser.fftSize));
     this.master.connect(this.analyser);
-    this.analyser.connect(ctx.destination);
+    this.analyser.connect(audioEngine.music!);
     this.master.gain.setTargetAtTime(this.volume, ctx.currentTime, 0.8);
     this._playing = true;
     this._duck = false;
@@ -179,7 +356,10 @@ class AmbientMusic {
       const buf = ctx.createBuffer(1, len, ctx.sampleRate);
       const data = buf.getChannelData(0);
       let last = 0;
-      for (let i = 0; i < len; i++) { last = last * 0.98 + (Math.random() * 2 - 1) * 0.02; data[i] = last * 8; }
+      for (let i = 0; i < len; i++) {
+        last = last * 0.98 + (Math.random() * 2 - 1) * 0.02;
+        data[i] = last * 8;
+      }
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;
@@ -201,6 +381,7 @@ class AmbientMusic {
     }
 
     this.schedulePluck();
+    if (mood.layers) this.homeLayers(mood);
   }
 
   // 三层：古琴式拨弦（五声音阶随机游走，偶带双音）
@@ -211,13 +392,30 @@ class AmbientMusic {
     const t = setTimeout(() => {
       if (!this._playing || !this.ctx || !this.master) return;
       // 步进游走：更接近人手弹奏的旋律走向
-      this.stepIdx = Math.max(0, Math.min(9, this.stepIdx + (Math.random() < 0.5 ? -1 : 1) * (Math.random() < 0.7 ? 1 : 2)));
+      this.stepIdx = Math.max(
+        0,
+        Math.min(
+          9,
+          this.stepIdx +
+            (Math.random() < 0.5 ? -1 : 1) * (Math.random() < 0.7 ? 1 : 2),
+        ),
+      );
       const step = this.mood.scale[this.stepIdx % this.mood.scale.length];
       const octave = this.stepIdx >= this.mood.scale.length ? 4 : 2;
-      this.pluck(this.mood.root * octave * Math.pow(2, step / 12), this.mood.pluckGain);
+      this.pluck(
+        this.mood.root * octave * Math.pow(2, step / 12),
+        this.mood.pluckGain,
+      );
       if (Math.random() < 0.28) {
-        const step2 = this.mood.scale[Math.floor(Math.random() * this.mood.scale.length)];
-        setTimeout(() => { if (this._playing) this.pluck(this.mood.root * 2 * Math.pow(2, step2 / 12), this.mood.pluckGain * 0.6); }, 260);
+        const step2 =
+          this.mood.scale[Math.floor(Math.random() * this.mood.scale.length)];
+        setTimeout(() => {
+          if (this._playing)
+            this.pluck(
+              this.mood.root * 2 * Math.pow(2, step2 / 12),
+              this.mood.pluckGain * 0.6,
+            );
+        }, 260);
       }
       this.schedulePluck();
     }, delay);
@@ -263,7 +461,89 @@ class AmbientMusic {
     this.sources.push(src);
   }
 
+  private homeLayers(mood: MusicMood) {
+    const ctx = this.ctx!,
+      master = this.master!,
+      reverb = this.reverb!;
+    const later = (fn: () => void, ms: number) => {
+      const t = setTimeout(() => {
+        this.timers = this.timers.filter((x) => x !== t);
+        if (this._playing && this.master === master) fn();
+      }, ms);
+      this.timers.push(t);
+    };
+    const tone = (frequency: number, duration: number, gain: number) => {
+      const source = ctx.createOscillator(),
+        env = ctx.createGain();
+      source.frequency.value = frequency;
+      env.gain.setValueAtTime(0, ctx.currentTime);
+      env.gain.linearRampToValueAtTime(gain, ctx.currentTime + 0.02);
+      env.gain.exponentialRampToValueAtTime(
+        0.0001,
+        ctx.currentTime + duration - 0.02,
+      );
+      env.gain.linearRampToValueAtTime(0, ctx.currentTime + duration);
+      source.connect(env);
+      env.connect(master);
+      env.connect(reverb);
+      source.start();
+      source.stop(ctx.currentTime + duration);
+      this.sources.push(source);
+      source.onended = () => {
+        this.sources = this.sources.filter((x) => x !== source);
+        env.disconnect();
+      };
+    };
+    if (mood.layers?.stream) {
+      const source = ctx.createBufferSource(),
+        buffer = ctx.createBuffer(1, ctx.sampleRate * 4, ctx.sampleRate),
+        d = buffer.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      source.buffer = buffer;
+      source.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 850;
+      bp.Q.value = 0.55;
+      const gain = ctx.createGain();
+      gain.gain.value = 0.035;
+      const lfo = ctx.createOscillator(),
+        amount = ctx.createGain();
+      lfo.frequency.value = 0.12;
+      amount.gain.value = 0.02;
+      lfo.connect(amount).connect(gain.gain);
+      source.connect(bp).connect(gain).connect(master);
+      source.start();
+      lfo.start();
+      this.sources.push(source, lfo);
+    }
+    const bell = () => {
+      [1, 2.76, 5.4, 8.93].forEach((r, i) =>
+        tone(mood.root * r, 5, 0.035 / (i + 1)),
+      );
+      later(bell, 25000 + Math.random() * 20000);
+    };
+    const chimes = () => {
+      for (let i = 0; i < 3; i++)
+        later(
+          () =>
+            tone(
+              mood.root *
+                4 *
+                Math.pow(2, mood.scale[(i + 2) % mood.scale.length] / 12),
+              2,
+              0.018,
+            ),
+          i * 240,
+        );
+      later(chimes, 12000 + Math.random() * 18000);
+    };
+    if (mood.layers?.bell) later(bell, 25000 + Math.random() * 20000);
+    if (mood.layers?.chimes) later(chimes, 12000 + Math.random() * 18000);
+  }
+
   stop(fade = 0.5) {
+    ++this.generation;
     this.stopNow(fade);
   }
 
@@ -282,13 +562,36 @@ class AmbientMusic {
     this.dest = null;
     if (master) {
       master.gain.setTargetAtTime(0, ctx.currentTime, Math.max(0.05, fade / 3));
-      setTimeout(() => {
-        for (const s of sources) { try { s.stop(); } catch { /* noop */ } }
-        try { master.disconnect(); } catch { /* noop */ }
-        try { dest?.disconnect(); } catch { /* noop */ }
-      }, fade * 1000 + 500);
+      setTimeout(
+        () => {
+          for (const s of sources) {
+            try {
+              s.stop();
+            } catch {
+              /* noop */
+            }
+          }
+          try {
+            master.disconnect();
+          } catch {
+            /* noop */
+          }
+          try {
+            dest?.disconnect();
+          } catch {
+            /* noop */
+          }
+        },
+        fade * 1000 + 500,
+      );
     } else {
-      for (const s of sources) { try { s.stop(); } catch { /* noop */ } }
+      for (const s of sources) {
+        try {
+          s.stop();
+        } catch {
+          /* noop */
+        }
+      }
     }
   }
 }

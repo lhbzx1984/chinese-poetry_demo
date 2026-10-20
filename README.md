@@ -231,3 +231,21 @@ Shijing is a Chinese-language gallery for exploring classical Chinese poetry thr
 To run locally, install Node.js 24 or later, clone this repository, run npm ci, download the official chinese-poetry archive into data/chinese-poetry, and run npm run build:db followed by npm run dev. Copy .env.example to .env.local for optional AI configuration. Without credentials, procedural backgrounds remain available. The application requires persistent local storage for SQLite, generated assets, and videos. Public deployments should configure an administrator token and protect the complete site through an authenticating reverse proxy.
 
 Poetry data comes from chinese-poetry under MIT; project code is also MIT. Generated commentary and images may be inaccurate. Footprints are simplified literary geography, and exact base-map provenance remains to be documented.
+
+### 前端字体与原创图形
+
+本地Web字体源自Google Fonts的Noto Serif SC及lxgw/LxgwWenKai，均按SIL OFL 1.1再分发。许可全文在 `public/fonts/NotoSerifSC-OFL.txt` 和 `public/fonts/LXGWWenKai-OFL.txt`。Web子集重命名为Shijing Serif / Shijing Display，覆盖界面常用字与Latin，罕见诗文字形使用系统字体兜底；两份WOFF2合计260100字节。仅从本仓库加载，不在构建或运行时下载。印章、分隔线、图标、纸纹为本项目SVG/CSS原创。
+
+## 前端第二轮改造验证
+
+完整改动、性能口径、音频与待补素材见 [改造报告](docs/frontend-v2-report.md)。
+
+先执行 `npm run build`、`npm start`，再在另一终端运行：
+
+```sh
+node scripts/screenshots.mjs
+node scripts/verify-frontend.mjs
+node scripts/verify-recording.mjs
+```
+
+这些脚本使用开发依赖 Playwright 和本机 Chrome；可用 `CHROME_PATH` 指定浏览器路径。截图脚本还支持 `BASE_URL` 和 `SCREENSHOT_DIR`。录制验证使用本地合成分镜/旁白，并拦截上传、删除请求，不写入真实影片馆。
