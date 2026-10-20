@@ -10,6 +10,7 @@ import {
   DEFAULT_SETTINGS, loadNarrationSettings, saveNarrationSettings, STYLE_PRESETS, useVoices,
   type NarrationSettings,
 } from "@/lib/narration-settings";
+import { adminFetch } from "@/lib/admin-client";
 import { EDGE_VOICES } from "@/lib/voices";
 
 // 程序化水墨背景：AI 配图不可用或尚未生成时的兜底画面。
@@ -390,7 +391,7 @@ export default function Reader({ poem }: { poem: Poem }) {
       // 4) 保存到影片馆并跳转
       setClipStage("保存到影片馆…");
       const qs = new URLSearchParams({ title: exp.poem.title, author: exp.poem.author, duration: total.toFixed(1) });
-      const up = await fetch(`/api/videos?${qs}`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: blob });
+      const up = await adminFetch(`/api/videos?${qs}`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: blob });
       if (!up.ok) throw new Error((await up.json().catch(() => ({}))).error ?? "保存失败");
       router.push("/video");
     } catch (e) {

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const DIR = path.join(process.cwd(), "data", "videos");
+const DIR = process.env.VIDEOS_DIR || path.join(process.cwd(), "data", "videos");
 
 export type VideoMeta = {
   id: string;
@@ -47,9 +47,9 @@ export function saveVideo(title: string, author: string, duration: number, bytes
   const id = "v" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const meta: VideoMeta = {
     id,
-    title: title.slice(0, 60) || "无题",
-    author: author.slice(0, 30) || "佚名",
-    duration,
+    title: title.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 60) || "无题",
+    author: author.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim().slice(0, 30) || "佚名",
+    duration: Number.isFinite(duration) ? Math.max(0, Math.min(600, duration)) : 0,
     bytes: bytes.length,
     createdAt: new Date().toISOString(),
   };

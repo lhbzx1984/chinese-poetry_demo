@@ -121,6 +121,10 @@ async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+export function needsImages(poem: Poem): boolean {
+  return imageConfig().enabled && !inflight.has(poem.id) && buildScenes(poem).scenes.some(s => !hasImage(poem, s.index) && (failedRounds.get(`${poem.id}:${s.index}`) ?? 0) < 2);
+}
+
 export function ensureImages(poem: Poem): void {
   const { enabled } = imageConfig();
   if (!enabled || inflight.has(poem.id)) return;

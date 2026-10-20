@@ -3,16 +3,19 @@
 import { NextResponse } from "next/server";
 import { synthesizeEdge } from "@/lib/edge-tts";
 import { EDGE_VOICES } from "@/lib/voices";
+import { limitRequest } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const limited = limitRequest(request, 'TTS', 30);
+  if (limited) return limited;
   const body = (await request.json().catch(() => null)) as
     | { text?: string; voice?: string; pitch?: number; rate?: number }
     | null;
-  const text = (body?.text ?? "").trim();
-  const voice = (body?.voice ?? "").trim();
+  const text = typeof body?.text === 'string' ? body.text.trim() : '';
+  const voice = typeof body?.voice === 'string' ? body.voice.trim() : '';
   const pitch = Number.isFinite(body?.pitch) ? Math.max(-60, Math.min(60, Number(body?.pitch))) : 0;
   const rate = Number.isFinite(body?.rate) ? Math.max(0.5, Math.min(1.4, Number(body?.rate))) : 1;
   if (!text || !voice) return NextResponse.json({ error: "参数不完整。" }, { status: 400 });

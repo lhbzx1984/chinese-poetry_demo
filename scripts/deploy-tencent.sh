@@ -7,18 +7,18 @@
 #   AGNES_API_KEY=sk-xxx   （AI 配图/译文/短片所需；留空可稍后在 .env.local 填）
 #   APP_DIR=/opt/shijing   （安装目录，默认 /opt/shijing）
 #   PORT=3000              （服务端口，默认 3000）
-# 功能：Node 24 安装 → 代码获取（GitHub 失败自动走国内镜像）→ 数据集下载
+# 功能：Node 24 安装 → 代码获取（默认直连 GitHub，可设置 GH_MIRROR）→ 数据集下载
 #       → 数据库构建 → 依赖安装 → 生产构建 → pm2 守护 → 防火墙提醒
 # 支持系统：Ubuntu / Debian / TencentOS / CentOS / RHEL（x86_64）
 # ============================================================
-set -uo pipefail
+set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/shijing}"
 PORT="${PORT:-3000}"
-NODE_VERSION_PREFIX="v24."
+GH_MIRROR="${GH_MIRROR:-}"
+REPO_REF="${REPO_REF:-main}"
 REPO_HTTPS="https://github.com/lhbzx1984/chinese-poetry_demo.git"
-REPO_ZIP="https://ghproxy.net/https://github.com/lhbzx1984/chinese-poetry_demo/archive/refs/heads/main.zip"
-DATASET_ZIP="https://ghproxy.net/https://github.com/chinese-poetry/chinese-poetry/archive/refs/heads/master.zip"
+DATASET_ZIP="${GH_MIRROR}https://github.com/chinese-poetry/chinese-poetry/archive/refs/heads/master.zip"
 NPM_REGISTRY="https://registry.npmmirror.com"
 
 log()  { echo -e "\033[1;33m[诗境部署]\033[0m $*"; }
@@ -83,7 +83,8 @@ else
   else
     log "镜像下载失败，改用 NodeSource 源…"
     if command -v apt-get >/dev/null; then
-      curl -fsSL https://deb.nodesource.com/setup_24.x | $SUDO bash -         || fail "NodeSource 源不可用"
+      curl -fsSL -o /tmp/shijing-nodesource.sh https://deb.nodesource.com/setup_24.x || fail "NodeSource 源不可用"
+      $SUDO bash /tmp/shijing-nodesource.sh
       $SUDO apt-get install -y nodejs
     else
       fail "Node 安装失败，请手动安装 Node.js 24"
@@ -102,43 +103,25 @@ else
   log "Node $(node -v) 就绪"
 fi
 
-# ---------- 3. 代码（GitHub 失败自动走国内镜像；重跑时 git pull，data/ 不受影响） ----------
-log "获取项目代码 → ${APP_DIR}"
+# ---------- 3. 获取固定版本，拒绝覆盖本地更改 ----------
+[[ -n "$APP_DIR" && "$APP_DIR" = /* && "$APP_DIR" != / ]] || fail "APP_DIR 必须是非根绝对路径"
+[[ -n "$REPO_REF" && "$REPO_REF" != -* ]] || fail "REPO_REF 无效"
+[[ -z "$GH_MIRROR" || "$GH_MIRROR" = https://*/ ]] || fail "GH_MIRROR 必须为以 / 结尾的 HTTPS 前缀"
+log "获取项目代码 → ${APP_DIR} (${REPO_REF})"
 $SUDO mkdir -p "$APP_DIR"
 $SUDO chown -R "$(whoami)" "$APP_DIR"
-if [ -d "$APP_DIR/.git" ]; then
-  git -C "$APP_DIR" pull --rebase 2>/dev/null || log "git pull 失败（不影响已有数据），继续用现有代码"
-else
-  git clone -q "$REPO_HTTPS" "$APP_DIR" 2>/dev/null \
-    || git clone -q "https://gh-proxy.com/$REPO_HTTPS" "$APP_DIR" 2>/dev/null \
-    || { log "clone 失败，改用镜像 ZIP…"
-         curl -fsSL --retry 3 -o /tmp/code.zip "$REPO_ZIP"
-         $SUDO unzip -qo /tmp/code.zip -d /tmp/code
-         cp -a /tmp/code/chinese-poetry_demo-main/. "$APP_DIR/"
-         rm -rf /tmp/code /tmp/code.zip
-         git -C "$APP_DIR" init -q 2>/dev/null || true; }
-  [ -f "$APP_DIR/package.json" ] || fail "代码获取失败"
+if [ ! -d "$APP_DIR/.git" ]; then
+  git clone "${GH_MIRROR}${REPO_HTTPS}" "$APP_DIR" || fail "代码获取失败"
 fi
-cd "$APP_DIR"
+[ -z "$(git -C "$APP_DIR" status --porcelain)" ] || fail "代码有本地修改，请先保存"
+git -C "$APP_DIR" fetch "${GH_MIRROR}${REPO_HTTPS}" "$REPO_REF"
+git -C "$APP_DIR" checkout --detach FETCH_HEAD
+[[ -n "$APP_DIR" && -d "$APP_DIR/.git" ]] || fail "项目目录无效"
+cd "$APP_DIR" || fail "无法进入项目目录"
 
-# ---------- 4. 依赖安装（build:db 需要 opencc-js） ----------
-log "安装依赖（npmmirror 源）…"
-dep_ok=0
-for attempt in 1 2 3; do
-  if [ "$attempt" -eq 2 ]; then
-    log "首次安装失败：清理 node_modules 与 npm 缓存后重试…"
-    rm -rf node_modules package-lock.json
-    npm cache clean --force 2>/dev/null
-  fi
-  if [ "$attempt" -eq 3 ]; then
-    log "二次失败：改用官方 npm 源重试…"
-    npm install --no-audit --no-fund --registry="https://registry.npmjs.org" && dep_ok=1 && break
-    rm -rf node_modules package-lock.json
-  fi
-  npm install --no-audit --no-fund --registry="$NPM_REGISTRY" && dep_ok=1 && break
-done
-[ "$dep_ok" -eq 1 ] || { echo "  npm 版本: $(npm -v), node 版本: $(node -v)"; echo "  完整日志: /root/.npm/_logs/ 最新一个文件"; fail "依赖安装失败（把上面日志与 npm 日志尾部发给开发者）"; }
-log "依赖安装完成"
+# ---------- 4. 固定锁文件安装依赖 ----------
+log "安装依赖…"
+npm ci --no-audit --no-fund --registry="$NPM_REGISTRY" || fail "依赖安装失败；请检查网络后重试"
 
 # ---------- 5. 数据集（chinese-poetry，约 95MB）+ 诗词数据库 ----------
 if [ ! -d data/chinese-poetry/json ] && [ ! -d data/chinese-poetry/全唐诗 ]; then
@@ -161,6 +144,7 @@ fi
 # ---------- 7. 环境变量（AI 能力） ----------
 if [ ! -f .env.local ]; then
   printf '%s\n' "AGNES_API_KEY=${AGNES_API_KEY:-}" "AI_API_BASE_URL=https://apihub.agnes-ai.com/v1" "IMAGE_MODEL=agnes-image-2.5-flash" "IMAGE_SIZE=1344x768" "TEXT_MODEL=agnes-3.0-flash" "VIDEO_MODEL=agnes-video-2.5-flash" > .env.local
+  chmod 600 .env.local
   [ -n "${AGNES_API_KEY:-}" ] && log ".env.local 已写入 AGNES_API_KEY" || log "未提供 AGNES_API_KEY：AI 配图/短片暂不可用，稍后编辑 ${APP_DIR}/.env.local 填入后 pm2 restart shijing"
 else
   log ".env.local 已存在，检查缺失的配置项…"
@@ -183,7 +167,7 @@ fi
 pm2 delete shijing >/dev/null 2>&1 || true
 NEXT_TELEMETRY_DISABLED=1 PORT="$PORT" pm2 start npm --name shijing -- start
 pm2 save >/dev/null
-pm2 startup 2>/dev/null | tail -1 | bash 2>/dev/null || log "pm2 开机自启需手动执行上面提示的命令"
+pm2 startup || log "请按 pm2 提示手动设置开机自启"
 
 # ---------- 9. 主机防火墙（云上还需在控制台安全组放行） ----------
 if command -v ufw >/dev/null && ufw status | grep -q "active"; then
