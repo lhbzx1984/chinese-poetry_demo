@@ -7,7 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "build:db": "node scripts/build-db.mjs"
+    "build:db": "node scripts/build-db.mjs",
+    "pretypecheck": "next typegen",
+    "typecheck": "tsc --noEmit",
+    "stats": "node scripts/stats.mjs",
+    "check:data": "node scripts/check-poet-coverage.mjs",
+    "test": "node --test",
+    "hero:video": "node --env-file-if-exists=.env.local scripts/fetch-hero-video.mjs"
   },
   "dependencies": {
     "echarts": "^5.4.3",
@@ -27,5 +33,15 @@
     "opencc-js": "^1.4.2",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "description": "诗境 · 中国古典诗词沉浸馆",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lhbzx1984/chinese-poetry_demo.git"
   }
 }
