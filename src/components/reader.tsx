@@ -75,6 +75,9 @@ export default function Reader({ poem }: { poem: Poem }) {
   const [notice, setNotice] = useState<string | null>(null);
   const voices = useVoices();
   const stopRef = useRef(false);
+  const narrationRunRef = useRef(0);
+  const previewRunRef = useRef(0);
+  const speechDoneRef = useRef<(() => void) | null>(null);
   const sectionRefs = useRef<(HTMLElement | null)[]>([]);
   const settingsRef = useRef(settings);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
@@ -141,11 +144,20 @@ export default function Reader({ poem }: { poem: Poem }) {
   }, [exp]);
 
   useEffect(() => {
+    const narrationRun = narrationRunRef;
+    const previewRun = previewRunRef;
+    const urls = ttsMemo.current;
     return () => {
       stopRef.current = true;
+      // 卸载时让仍在等待网络请求的朗读和试听失效。
+      narrationRun.current++;
+      previewRun.current++;
+      speechDoneRef.current?.();
       if ("speechSynthesis" in window) speechSynthesis.cancel();
       audioRef.current?.pause();
       ambientMusic.stop();
+      for (const url of urls.values()) URL.revokeObjectURL(url);
+      urls.clear();
     };
   }, []);
 
@@ -165,6 +177,8 @@ export default function Reader({ poem }: { poem: Poem }) {
 
   const stopAll = useCallback(() => {
     stopRef.current = true;
+    narrationRunRef.current++;
+    speechDoneRef.current?.();
     if ("speechSynthesis" in window) speechSynthesis.cancel();
     audioRef.current?.pause();
     audioRef.current = null;
@@ -194,22 +208,29 @@ export default function Reader({ poem }: { poem: Poem }) {
     return url;
   }, []);
 
-  const playEdge = useCallback(async (text: string) => {
+  const playEdge = useCallback(async (text: string, runId: number) => {
     const url = await synthUrl(text, settingsRef.current.edgeVoice);
+    if (stopRef.current || narrationRunRef.current !== runId) return;
     const audio = new Audio(url); // 语速/音调已在服务端合成
     audioRef.current = audio;
     audio.onplay = () => ambientMusic.setDuck(true);
     await new Promise<void>((resolve) => {
-      audio.onended = () => resolve();
-      audio.onerror = () => resolve();
-      audio.play().catch(() => resolve());
+      const finish = () => {
+        if (speechDoneRef.current === finish) speechDoneRef.current = null;
+        resolve();
+      };
+      speechDoneRef.current = finish;
+      audio.onended = finish;
+      audio.onerror = finish;
+      audio.play().catch(finish);
     });
-    audioRef.current = null;
+    if (audioRef.current === audio) audioRef.current = null;
   }, [synthUrl]);
 
-  const speakBrowser = useCallback((text: string) => {
+  const speakBrowser = useCallback((text: string, runId?: number) => {
     return new Promise<void>((resolve) => {
       if (!("speechSynthesis" in window)) return resolve();
+      if (runId !== undefined && (stopRef.current || narrationRunRef.current !== runId)) return resolve();
       const s = settingsRef.current;
       const u = new SpeechSynthesisUtterance(text);
       u.lang = "zh-CN";
@@ -218,8 +239,13 @@ export default function Reader({ poem }: { poem: Poem }) {
       const voice = window.speechSynthesis.getVoices().find((v) => v.voiceURI === s.voiceURI);
       if (voice) u.voice = voice;
       u.onstart = () => ambientMusic.setDuck(true);
-      u.onend = () => resolve();
-      u.onerror = () => resolve();
+      const finish = () => {
+        if (speechDoneRef.current === finish) speechDoneRef.current = null;
+        resolve();
+      };
+      speechDoneRef.current = finish;
+      u.onend = finish;
+      u.onerror = finish;
       speechSynthesis.cancel();
       speechSynthesis.speak(u);
     });
@@ -240,38 +266,43 @@ export default function Reader({ poem }: { poem: Poem }) {
       return;
     }
     stopRef.current = false;
+    const runId = ++narrationRunRef.current;
     setSpeaking(true);
     ensureMusic();
     // 先念诗名与作者，再进入诗句
     const announce = `《${poem.title}》，${poem.author}。`;
     try {
-      if (settingsRef.current.edgeVoice) await playEdge(announce);
-      else await speakBrowser(announce);
+      if (settingsRef.current.edgeVoice) await playEdge(announce, runId);
+      else await speakBrowser(announce, runId);
     } catch { /* 朗读开场白失败不阻塞正文 */ }
+    if (stopRef.current || narrationRunRef.current !== runId) return;
     ambientMusic.setDuck(false);
     const scenes = exp.scenes;
     for (let i = 0; i < scenes.length; i++) {
-      if (stopRef.current) break;
+      if (stopRef.current || narrationRunRef.current !== runId) break;
       const s = scenes[i];
       setActive(i);
       sectionRefs.current[i]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
       const text = s.lines.join("。");
       const useEdge = Boolean(settingsRef.current.edgeVoice);
       try {
-        if (useEdge) await playEdge(text);
-        else await speakBrowser(text);
+        if (useEdge) await playEdge(text, runId);
+        else await speakBrowser(text, runId);
       } catch (e) {
         if (useEdge) {
           flashNotice(`Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），本幕改用浏览器语音。`);
-          await speakBrowser(text);
+          await speakBrowser(text, runId);
         }
       }
+      if (stopRef.current || narrationRunRef.current !== runId) return;
       ambientMusic.setDuck(false);
       if (!stopRef.current && i < scenes.length - 1) {
         await new Promise((r) => setTimeout(r, 600));
+        if (stopRef.current || narrationRunRef.current !== runId) return;
         if (settingsRef.current.edgeVoice) synthUrl(scenes[i + 1].lines.join("。"), settingsRef.current.edgeVoice).catch(() => void 0);
       }
     }
+    if (stopRef.current || narrationRunRef.current !== runId) return;
     if (!soloRef.current) ambientMusic.stop();
     setSpeaking(false);
   }, [exp, speaking, stopAll, ensureMusic, speakBrowser, playEdge, flashNotice, synthUrl, poem]);
@@ -293,6 +324,8 @@ export default function Reader({ poem }: { poem: Poem }) {
   // 试听当前设置
   const preview = useCallback(async () => {
     if (previewing) {
+      previewRunRef.current++;
+      speechDoneRef.current?.();
       speechSynthesis.cancel();
       audioRef.current?.pause();
       audioRef.current = null;
@@ -300,11 +333,13 @@ export default function Reader({ poem }: { poem: Poem }) {
       setPreviewing(false);
       return;
     }
+    const runId = ++previewRunRef.current;
     setPreviewing(true);
     ensureMusic();
     const text = "明月几时有，把酒问青天。";
     const finish = () => {
       setTimeout(() => {
+        if (previewRunRef.current !== runId) return;
         if (!soloRef.current) ambientMusic.stop();
         setPreviewing(false);
       }, 900);
@@ -312,6 +347,7 @@ export default function Reader({ poem }: { poem: Poem }) {
     if (settingsRef.current.edgeVoice) {
       try {
         const url = await synthUrl(text, settingsRef.current.edgeVoice);
+        if (previewRunRef.current !== runId) return;
         const audio = new Audio(url);
         audioRef.current = audio;
         audio.onplay = () => ambientMusic.setDuck(true);
@@ -320,10 +356,12 @@ export default function Reader({ poem }: { poem: Poem }) {
         await audio.play();
         return;
       } catch (e) {
+        if (previewRunRef.current !== runId) return;
         flashNotice(`Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），试听改用浏览器语音。`);
       }
     }
     await speakBrowser(text);
+    if (previewRunRef.current !== runId) return;
     finish();
   }, [previewing, ensureMusic, synthUrl, speakBrowser, flashNotice]);
 
