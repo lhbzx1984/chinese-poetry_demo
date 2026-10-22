@@ -30,7 +30,13 @@ export default function VideoLibrary() {
   const load = useCallback(async () => {
     try {
       const r = await fetch("/api/videos");
-      if (r.ok) setVideos((await r.json()).data);
+      if (r.ok) {
+        const items: VideoMeta[] = (await r.json()).data;
+        setVideos(items);
+        const playId = new URL(window.location.href).searchParams.get("play");
+        const generated = items.find(v => v.id === playId);
+        if (generated) setActive(generated);
+      }
       else throw new Error((await r.json()).error || "影片载入失败。");
     } catch (e) {
       setError(e instanceof Error ? e.message : "影片载入失败。");
@@ -94,7 +100,7 @@ export default function VideoLibrary() {
           <>
             {active ? (
               <div className="player-card">
-                <video key={active.id} controls autoPlay preload="auto" src={`/api/videos/${active.id}`} />
+                <video key={active.id} controls autoPlay preload="auto" src={`/api/videos/${active.id}?v=${active.bytes}`} />
                 <div className="player-meta">
                   <div>
                     <span className="p-title">《{active.title}》</span>
@@ -103,7 +109,7 @@ export default function VideoLibrary() {
                     </span>
                   </div>
                   <div className="player-actions">
-                    <a className="page-btn" href={`/api/videos/${active.id}`} download={`诗境·${active.title}·${active.author}.webm`}>
+                    <a className="page-btn" href={`/api/videos/${active.id}?v=${active.bytes}`} download={`诗境·${active.title}·${active.author}.webm`}>
                       ⬇ 下载影片
                     </a>
                     <button

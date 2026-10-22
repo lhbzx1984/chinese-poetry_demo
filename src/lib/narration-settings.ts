@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { DEFAULT_ONLINE_VOICE, DOUBAO_VOICES } from "./voices";
 
 export type NarrationSettings = {
   voiceURI: string; // 系统中文语音的 voiceURI（仅 edgeVoice 为空时生效）
-  edgeVoice: string; // "" = 浏览器语音；否则为 Edge 神经语音 id（晓晓/云希…，需联网）
+  edgeVoice: string; // 保留旧存储字段名；空值为本机语音，否则为豆包或 Edge 音色 ID
   rate: number;
   pitch: number;
   music: boolean;
@@ -14,7 +15,7 @@ export type NarrationSettings = {
 
 export const DEFAULT_SETTINGS: NarrationSettings = {
   voiceURI: "",
-  edgeVoice: "",
+  edgeVoice: DEFAULT_ONLINE_VOICE,
   rate: 0.85,
   pitch: 1,
   music: true,
@@ -33,7 +34,7 @@ export function loadNarrationSettings(): NarrationSettings {
     // 只保留仍支持的字段（旧版本残留自动忽略）
     return {
       voiceURI: typeof saved.voiceURI === "string" ? saved.voiceURI : "",
-      edgeVoice: typeof saved.edgeVoice === "string" ? saved.edgeVoice : "",
+      edgeVoice: DOUBAO_VOICES.some(v => v.id === saved.edgeVoice) ? saved.edgeVoice! : DEFAULT_ONLINE_VOICE,
       rate: typeof saved.rate === "number" ? saved.rate : DEFAULT_SETTINGS.rate,
       pitch: typeof saved.pitch === "number" ? saved.pitch : DEFAULT_SETTINGS.pitch,
       music: typeof saved.music === "boolean" ? saved.music : DEFAULT_SETTINGS.music,

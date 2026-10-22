@@ -120,7 +120,7 @@ class AmbientMusic {
     this.setVolume(this.volume);
   }
 
-  async start(mood: MusicMood) {
+  async start(mood: MusicMood, audible = true) {
     this.stopNow(0.3);
     this.mood = mood;
     const AC: typeof AudioContext | undefined =
@@ -135,7 +135,7 @@ class AmbientMusic {
     this.analyser.fftSize = 512;
     this.probe = new Uint8Array(new ArrayBuffer(this.analyser.fftSize));
     this.master.connect(this.analyser);
-    this.analyser.connect(ctx.destination);
+    if (audible) this.analyser.connect(ctx.destination);
     this.master.gain.setTargetAtTime(this.volume, ctx.currentTime, 0.8);
     this._playing = true;
     this._duck = false;

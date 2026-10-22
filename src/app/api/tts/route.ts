@@ -1,8 +1,9 @@
-// 朗读合成：POST {text, voice, pitch, rate} → Edge 神经语音 MP3（磁盘缓存，重复朗读零消耗）。
+// 朗读合成：POST {text, voice, pitch, rate} → 豆包或 Edge MP3（磁盘缓存）。
 // 失败时返回 503，前端回退浏览器语音。
 import { NextResponse } from "next/server";
 import { synthesizeEdge } from "@/lib/edge-tts";
-import { EDGE_VOICES } from "@/lib/voices";
+import { DOUBAO_VOICES, EDGE_VOICES } from "@/lib/voices";
+import { synthesizeDoubao } from "@/lib/doubao-tts";
 import { limitRequest } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -19,14 +20,15 @@ export async function POST(request: Request) {
   const pitch = Number.isFinite(body?.pitch) ? Math.max(-60, Math.min(60, Number(body?.pitch))) : 0;
   const rate = Number.isFinite(body?.rate) ? Math.max(0.5, Math.min(1.4, Number(body?.rate))) : 1;
   if (!text || !voice) return NextResponse.json({ error: "参数不完整。" }, { status: 400 });
-  if (!EDGE_VOICES.some((v) => v.id === voice)) {
+  const doubao = DOUBAO_VOICES.some(v => v.id === voice);
+  if (!doubao && !EDGE_VOICES.some((v) => v.id === voice)) {
     return NextResponse.json({ error: "未知音色。" }, { status: 400 });
   }
   if (text.length > 2000) return NextResponse.json({ error: "单次合成的文本过长。" }, { status: 400 });
   try {
-    const buf = await synthesizeEdge(voice, text, pitch, rate);
+    const buf = await (doubao ? synthesizeDoubao : synthesizeEdge)(voice, text, pitch, rate);
     return new Response(new Uint8Array(buf), {
-      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400" },
+      headers: { "Content-Type": "audio/mpeg", "Cache-Control": "private, max-age=86400", "X-TTS-Provider": doubao ? "doubao" : "edge" },
     });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "语音合成不可用。" }, { status: 503 });

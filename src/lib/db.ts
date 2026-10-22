@@ -76,6 +76,9 @@ export function listPoems(filters: PoemFilters): PoemListResult {
     if ([...q].length >= 3) {
       clauses.push("p.id IN (SELECT rowid FROM poems_fts WHERE poems_fts MATCH ?)");
       likeParams.push('"' + q.replace(/"/g, '""') + '"');
+    } else {
+      clauses.push("p.lines_json LIKE ? ESCAPE '\\'");
+      likeParams.push(like);
     }
     where.push("(" + clauses.join(" OR ") + ")");
     params.push(...likeParams);
@@ -124,7 +127,12 @@ export function listAuthors(opts: { dynasty?: string; q?: string; limit?: number
   return rows.map((r) => ({ name: r.name, dynasty: r.dynasty, poemCount: r.poem_count }));
 }
 
-export function randomPoemId(filters: { dynasty?: string; tag?: string }): number | null {
+export function randomPoemId(filters: { dynasty?: string; tag?: string; author?: string; q?: string }): number | null {
+  if (filters.author || filters.q) {
+    const { total } = listPoems({ ...filters, pageSize: 1 });
+    if (!total) return null;
+    return listPoems({ ...filters, pageSize: 1, page: 1 + Math.floor(Math.random() * total) }).items[0]?.id ?? null;
+  }
   const where: string[] = [];
   const params: (string | number)[] = [];
   if (filters.dynasty) { where.push("p.dynasty = ?"); params.push(filters.dynasty); }

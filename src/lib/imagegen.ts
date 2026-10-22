@@ -124,17 +124,17 @@ export function ensureImages(poem: Poem): void {
   if (!enabled || inflight.has(poem.id)) return;
   const { bible, scenes } = buildScenes(poem);
   const task = (async () => {
-    for (const scene of scenes) {
+    await Promise.all(scenes.map(async scene => {
       const failKey = `${poem.id}:${scene.index}`;
-      if (hasImage(poem, scene.index)) continue;
-      if ((failedRounds.get(failKey) ?? 0) >= 2) continue; // 本轮会话内不再重试
+      if (hasImage(poem, scene.index)) return;
+      if ((failedRounds.get(failKey) ?? 0) >= 2) return; // 本轮会话内不再重试
       try {
         await withSlot(() => generateOne(poem, bible, scene.index, scenePrompt(bible, scene, poem, scenes)));
         failedRounds.delete(failKey);
       } catch {
         failedRounds.set(failKey, (failedRounds.get(failKey) ?? 0) + 1);
       }
-    }
+    }));
   })().finally(() => inflight.delete(poem.id));
   inflight.set(poem.id, task);
 }

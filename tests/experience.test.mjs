@@ -25,8 +25,13 @@ test('AI仅新任务消耗限流额度，缓存命中和未配置AI仍可读取'
   fs.writeFileSync(path.join(legacy, '0.jpg'), Buffer.alloc(1001));
   fs.writeFileSync(path.join(legacy, 'analysis.json'), JSON.stringify({ scenes: [{ yi: '旧分镜整联译文', jian: '' }] }));
   let calls = 0;
+  let active = 0;
+  let peak = 0;
   globalThis.fetch = async () => {
     calls++;
+    peak = Math.max(peak, ++active);
+    await new Promise(resolve => setImmediate(resolve));
+    active--;
     return Response.json({ data: [{ b64_json: Buffer.alloc(1001, 7).toString('base64') }] });
   };
   const { GET } = await import('../src/app/api/poems/[id]/experience/route.ts');
@@ -50,6 +55,7 @@ test('AI仅新任务消耗限流额度，缓存命中和未配置AI仍可读取'
     assert.equal(image.status, 200);
     assert.equal(new Uint8Array(await image.arrayBuffer())[0], 7, '读图路由必须定位当前分镜缓存');
     assert.equal(calls, 4);
+    assert.equal(peak, 2, '同诗分镜并行生成，同时遵守全局两张图的并发限制');
     const denied = await GET(request, context(2));
     assert.equal(denied.status, 429);
     assert.ok(Number(denied.headers.get('Retry-After')) > 0);

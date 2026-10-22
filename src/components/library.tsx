@@ -110,6 +110,8 @@ export default function Library() {
       const params = new URLSearchParams();
       if (dynasty) params.set("dynasty", dynasty);
       if (tag) params.set("tag", tag);
+      if (author) params.set("author", author);
+      if (q) params.set("q", q);
       const r = await fetch(`/api/poems/random?${params}`);
       const d = await r.json();
       if (!r.ok || !d.data?.id) throw new Error(d.error || "当前筛选下没有诗词。");
@@ -197,6 +199,7 @@ export default function Library() {
             onChange={(e) => changeFilter(() => setAuthor(e.target.value))}
           >
             <option value="">全部作者</option>
+            {author && !authors.some(a => a.name === author) && <option value={author}>{author}</option>}
             {authors.map((a) => (
               <option key={`${a.dynasty}-${a.name}`} value={a.name}>
                 {a.name}（{a.dynasty} · {a.poemCount}首）
@@ -218,6 +221,8 @@ export default function Library() {
                 setTag("");
                 setAuthor("");
                 setQInput("");
+                setQ("");
+                setPage(1);
               }}
             >
               ✕ 清空筛选

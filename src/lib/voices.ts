@@ -1,6 +1,12 @@
 // 朗读音色目录（纯数据，客户端服务端共用）
 export type EdgeVoice = { id: string; name: string; gender: "女" | "男"; style: string };
 
+export const DOUBAO_VOICES: EdgeVoice[] = [
+  { id: "zh_female_vv_uranus_bigtts", name: "豆包 Vivi", gender: "女", style: "自然清晰" },
+  { id: "zh_male_wenrouxiaoge_uranus_bigtts", name: "豆包温柔小哥", gender: "男", style: "温和舒缓" },
+];
+export const DEFAULT_ONLINE_VOICE = DOUBAO_VOICES[0].id;
+
 // Edge 神经语音（msedge-tts，免费无需 key，需联网）
 export const EDGE_VOICES: EdgeVoice[] = [
   { id: "zh-CN-XiaoxiaoNeural", name: "晓晓", gender: "女", style: "温暖柔美" },

@@ -48,4 +48,5 @@ export type ExperienceData = {
   aiProgress: { done: number; total: number };
   imagesCached: boolean;
   analysisDone: boolean;
+  analysisStatus: "pending" | "ready" | "unconfigured" | "failed";
 };

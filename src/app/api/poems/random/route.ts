@@ -10,6 +10,8 @@ export async function GET(request: Request) {
     const id = randomPoemId({
       dynasty: p.get("dynasty") || undefined,
       tag: p.get("tag") || undefined,
+      author: p.get("author") || undefined,
+      q: p.get("q")?.slice(0, 200) || undefined,
     });
     return NextResponse.json({ data: { id } });
   } catch (e) {

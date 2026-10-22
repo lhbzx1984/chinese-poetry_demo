@@ -59,6 +59,7 @@ export async function GET(request: Request, context: RouteContext<"/api/poems/[i
       aiProgress: { done: images.ready, total: scenes.length },
       imagesCached,
       analysisDone: (textConfig().enabled && (analysisReady || analysisFailed)) || !textConfig().enabled,
+      analysisStatus: analysisFailed ? "failed" : analysisReady ? "ready" : textConfig().enabled ? "pending" : "unconfigured",
     };
 
     return NextResponse.json({ data, settled: imagesSettled && (data.analysisDone || analysisFailed) });

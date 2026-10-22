@@ -1,18 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { DYNASTY_ORDER, POET_PLACES, type PoetPlace } from "@/data/poet-places";
 import type { PoemSummary } from "@/lib/types";
-
-type SpotDatum = {
-  poet: string;
-  dynasty: string;
-  city: string;
-  label: string;
-  labelOn: boolean;
-  value: [number, number, number];
-};
+import { buildSpots, type SpotDatum } from "@/lib/poet-map";
 
 type Ring = [number, number][];
 type GeoFeature = { properties: { name?: string }; geometry: { type: "Polygon" | "MultiPolygon"; coordinates: Ring[][] | Ring[] } | null };
@@ -63,57 +55,42 @@ function drawDarkWorldUrl(world: GeoFeature[]): string {
   return canvas.toDataURL("image/png");
 }
 
-// 光点标记：默认一位诗人一个主光点（籍贯），数量与诗人对应；
-// 选中某位诗人时，展开他完整的足迹。
-// 同城/近距坐标自动散开（如曹操曹植同为亳州），避免光点互相覆盖。
-function buildSpots(poets: PoetPlace[], expand: string | null): { points: SpotDatum[]; halos: SpotDatum[] } {
-  const points: SpotDatum[] = [];
-  const halos: SpotDatum[] = [];
-  const placed = new Map<string, number>();
-  const spread = (lng: number, lat: number): [number, number] => {
-    const key = `${Math.round(lng * 2)}:${Math.round(lat * 2)}`;
-    const k = placed.get(key) ?? 0;
-    placed.set(key, k + 1);
-    if (k === 0) return [lng, lat];
-    const ring = Math.ceil(k / 4);
-    const angle = ((k % 4) * Math.PI) / 2 + ring * 0.6;
-    const r = 1.15 * ring;
-    return [lng + Math.cos(angle) * r, lat + Math.sin(angle) * r * 0.8];
-  };
-  for (const poet of poets) {
-    const spots = poet.name === expand ? poet.spots : [poet.spots[0]];
-    spots.forEach((s, i) => {
-      const [lng, lat] = spread(s.lng, s.lat);
-      const datum: SpotDatum = {
-        poet: poet.name,
-        dynasty: poet.dynasty,
-        city: s.city,
-        label: s.label,
-        labelOn: i === 0,
-        value: [lng, lat, 0.35],
-      };
-      points.push(datum);
-      if (i === 0) halos.push({ ...datum, value: [lng, lat, 0.15] });
-    });
-  }
-  return { points, halos };
-}
-
 export default function MapExplorer() {
   const boxRef = useRef<HTMLDivElement>(null);
+  const poetCardRef = useRef<HTMLDivElement>(null);
   const insetRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<import("echarts").ECharts | null>(null);
   const [dynasty, setDynasty] = useState<string>("");
   const [ready, setReady] = useState(false);
   const [sel, setSel] = useState<PoetPlace | null>(null);
   const [poems, setPoems] = useState<PoemSummary[] | null>(null);
-  const [autoTour, setAutoTour] = useState(true);
-  const autoTourRef = useRef(true);
+  const [autoTour, setAutoTour] = useState(false);
+  const autoTourRef = useRef(false);
   useEffect(() => { autoTourRef.current = autoTour; }, [autoTour]);
   const [mapError, setMapError] = useState<string | null>(null);
   const [poemError, setPoemError] = useState<string | null>(null);
 
-  const activePoets = dynasty ? POET_PLACES.filter((p) => p.dynasty === dynasty) : POET_PLACES;
+  const openPoet = useCallback((poet: PoetPlace) => {
+    setSel(poet);
+    setDynasty(current => current && current !== poet.dynasty ? "" : current);
+    autoTourRef.current = false;
+    setAutoTour(false);
+    chartRef.current?.setOption({ geo3D: { viewControl: { autoRotate: false } } });
+    // 名录位于地图下方，打开卡片时把地图中的详情带回视口。
+    boxRef.current?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
+    poetCardRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (sel) poetCardRef.current?.focus({ preventScroll: true });
+  }, [sel]);
+
+  const activePoets = useMemo(() => dynasty ? POET_PLACES.filter((p) => p.dynasty === dynasty) : POET_PLACES, [dynasty]);
+
+  const selectDynasty = (value: string) => {
+    setDynasty(value);
+    setSel(null);
+  };
 
   const buildSeries = useCallback((poets: PoetPlace[], expand: string | null = null) => {
     const { points, halos } = buildSpots(poets, expand);
@@ -123,21 +100,22 @@ export default function MapExplorer() {
           name: "足迹光晕",
           type: "scatter3D",
           coordinateSystem: "geo3D",
+          geo3DIndex: 0,
           symbolSize: 20,
           itemStyle: { color: "rgba(64,196,255,0.16)", opacity: 1, borderColor: "rgba(127,220,255,0.35)", borderWidth: 1 },
           data: halos,
           silent: true,
-          zlevel: 1,
         },
         {
           name: "诗人足迹",
           type: "scatter3D",
           coordinateSystem: "geo3D",
+          geo3DIndex: 0,
           symbolSize: 11,
           itemStyle: { color: "#dff6ff", opacity: 1, borderColor: "#37b6ff", borderWidth: 2 },
           label: {
             show: true,
-            formatter: (p: { data: SpotDatum }) => (p.data.labelOn ? p.data.poet : ""),
+            formatter: (p: { data: SpotDatum }) => (p.data.labelOn ? expand ? `${p.data.poet} · ${p.data.city}` : p.data.poet : ""),
             position: "top",
             distance: 8,
             color: "#cfeeff",
@@ -166,9 +144,10 @@ export default function MapExplorer() {
       return {
         geo3D: {
           map: "china3d",
-          boxDepth: 96,
-          boxHeight: 9,
-          regionHeight: 3.4,
+          boxDepth: "auto",
+          // 留极小的标记高度，避免圆点被顶面裁掉，同时防止透视悬空漂移。
+          boxHeight: 1,
+          regionHeight: 0.8,
           shading: "realistic",
           realisticMaterial: { roughness: 0.42, metalness: 0.3 },
           postEffect: { enable: true, bloom: { enable: true, intensity: 0.22 }, SSAO: { enable: false } },
@@ -181,7 +160,7 @@ export default function MapExplorer() {
             alpha: 42,
             beta: 0,
             distance: 88,
-            autoRotate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+            autoRotate: false,
             autoRotateSpeed: 0.45,
             minDistance: 42,
             maxDistance: 150,
@@ -211,6 +190,7 @@ export default function MapExplorer() {
     motion.addEventListener("change", updateMotion);
     let disposed = false;
     let chart: import("echarts").ECharts | null = null;
+    let mini: import("echarts").ECharts | null = null;
     (async () => {
       const echarts = await import("echarts");
       await import("echarts-gl");
@@ -240,9 +220,9 @@ export default function MapExplorer() {
         if (params.seriesType !== "scatter3D" || !params.data) return;
         const datum = params.data as unknown as SpotDatum;
         const poet = POET_PLACES.find((p) => p.name === datum.poet);
-        if (poet) setSel(poet);
+        if (poet) openPoet(poet);
       });
-      setAutoTour(!motion.matches);
+      setAutoTour(false);
       setReady(true);
       if (typeof window !== "undefined") {
         (window as unknown as Record<string, unknown>).__shijingMap = chart;
@@ -262,7 +242,7 @@ export default function MapExplorer() {
           const fullRes = await fetch("/geo/china.json");
           const fullJson = (await fullRes.json()) as unknown as Parameters<typeof echarts.registerMap>[1];
           echarts.registerMap("cn-full", fullJson);
-          const mini = echarts.init(insetRef.current, undefined, { renderer: "canvas" });
+          mini = echarts.init(insetRef.current, undefined, { renderer: "canvas" });
           mini.setOption({
             geo: {
               map: "cn-full",
@@ -288,14 +268,15 @@ export default function MapExplorer() {
       motion.removeEventListener("change", updateMotion);
       window.removeEventListener("resize", onResize);
       chart?.dispose();
+      mini?.dispose();
       chartRef.current = null;
     };
-  }, [buildOption]);
+  }, [buildOption, openPoet]);
 
   // 朝代切换：更新光点与飞线
   useEffect(() => {
     if (!ready || !chartRef.current) return;
-    chartRef.current.setOption({ series: buildSeries(activePoets, sel?.name ?? null).series }, { notMerge: false, lazyUpdate: true });
+    chartRef.current.setOption({ series: buildSeries(activePoets, sel?.name ?? null).series }, { replaceMerge: ["series"] });
   }, [dynasty, ready, activePoets, sel, buildSeries]);
 
   // 支持程序化打开作者卡
@@ -303,11 +284,11 @@ export default function MapExplorer() {
     const open = (e: Event) => {
       const name = (e as CustomEvent<string>).detail;
       const poet = POET_PLACES.find((p) => p.name === name);
-      if (poet) setSel(poet);
+      if (poet) openPoet(poet);
     };
     window.addEventListener("shijing:open-poet", open);
     return () => window.removeEventListener("shijing:open-poet", open);
-  }, []);
+  }, [openPoet]);
 
   // 作者卡：代表作优先
   useEffect(() => {
@@ -359,14 +340,14 @@ export default function MapExplorer() {
           </p>
         </div>
         <div className="timeline" role="group" aria-label="按朝代筛选">
-          <button className={`chip${dynasty === "" ? " active" : ""}`} onClick={() => setDynasty("")}>
+          <button className={`chip${dynasty === "" ? " active" : ""}`} onClick={() => selectDynasty("")}>
             全部
           </button>
           {DYNASTY_ORDER.map((d) => (
             <button
               key={d.key}
               className={`chip${dynasty === d.key ? " active" : ""}`}
-              onClick={() => setDynasty(dynasty === d.key ? "" : d.key)}
+              onClick={() => selectDynasty(dynasty === d.key ? "" : d.key)}
               title={d.span}
             >
               {d.label}
@@ -392,7 +373,7 @@ export default function MapExplorer() {
         {!ready && <div className="map-loading" role="status">{mapError || "山河载入中…"}</div>}
 
         {sel && (
-          <div className="poet-card" role="dialog" aria-label={`${sel.name}介绍`}>
+          <div className="poet-card" id="poet-detail" ref={poetCardRef} tabIndex={-1} role="dialog" aria-label={`${sel.name}介绍`}>
             <button className="pop-close" onClick={() => setSel(null)} aria-label="关闭">
               ×
             </button>
@@ -440,7 +421,10 @@ export default function MapExplorer() {
           </div>
         )}
       </div>
-      <p className="map-foot">足迹为文学史通说之简绘，供神游参照 · 点击地图光点或下方名字，走进一位诗人</p>
+      <p className="map-foot" role="status">
+        当前显示：{sel ? `${sel.name} · ${sel.spots.length} 处足迹` : `${dynasty || "全部朝代"} · ${activePoets.length} 位诗人`}
+        {" · "}足迹为文学史通说之简绘，供神游参照 · 点击地图光点或下方名字，走进一位诗人
+      </p>
       <div className="poet-index" aria-label="诗人名录">
         <div className="poet-index-title">
           {dynasty
@@ -457,7 +441,9 @@ export default function MapExplorer() {
               <button
                 key={p.name}
                 className={`chip small${sel?.name === p.name ? " active" : ""}`}
-                onClick={() => setSel(p)}
+                onClick={() => openPoet(p)}
+                aria-expanded={sel?.name === p.name}
+                aria-controls="poet-detail"
                 title={`${p.years} · ${p.spots.length} 处足迹`}
               >
                 {p.name}

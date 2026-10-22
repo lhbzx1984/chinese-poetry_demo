@@ -1,6 +1,7 @@
 // 影片馆：用户生成的短片存储（data/videos/{id}.webm + {id}.json 元数据）
 import fs from "node:fs";
 import path from "node:path";
+import { fixWebmDuration } from "./webm-duration";
 
 const DIR = process.env.VIDEOS_DIR || path.join(process.cwd(), "data", "videos");
 
@@ -45,6 +46,7 @@ export function videoPath(id: string) {
 
 export function saveVideo(title: string, author: string, duration: number, bytes: Buffer): VideoMeta {
   ensureDir();
+  bytes = fixWebmDuration(bytes, duration);
   const id = "v" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const meta: VideoMeta = {
     id,

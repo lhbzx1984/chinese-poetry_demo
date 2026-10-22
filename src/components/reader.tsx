@@ -5,13 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ExperienceData, Poem } from "@/lib/types";
 import { ambientMusic, moodByName, moodForPoem, ALL_MOOD_NAMES } from "@/lib/ambient-music";
-import { generatePoemClip } from "@/lib/clip";
+import { generatePoemClip, synthesizeClipNarrations, waitForClipImages } from "@/lib/clip";
 import {
-  DEFAULT_SETTINGS, loadNarrationSettings, saveNarrationSettings, STYLE_PRESETS, useVoices,
+  DEFAULT_SETTINGS, loadNarrationSettings, saveNarrationSettings, STYLE_PRESETS,
   type NarrationSettings,
 } from "@/lib/narration-settings";
 import { adminFetch } from "@/lib/admin-client";
-import { EDGE_VOICES } from "@/lib/voices";
+import { DOUBAO_VOICES } from "@/lib/voices";
 import { environmentById, matchSceneEnvironment, SCENE_ENVIRONMENTS, type SceneEnvironment, type SceneEnvironmentId } from "@/lib/scene-environments";
 
 // 本地写实场景资源无需运行时 AI 密钥；诗句和手动选择共同决定画面。
@@ -35,7 +35,6 @@ export default function Reader({ poem }: { poem: Poem }) {
   const [clipStage, setClipStage] = useState<string | null>(null);
   const router = useRouter();
   const [notice, setNotice] = useState<string | null>(null);
-  const voices = useVoices();
   const stopRef = useRef(false);
   const narrationRunRef = useRef(0);
   const previewRunRef = useRef(0);
@@ -46,6 +45,8 @@ export default function Reader({ poem }: { poem: Poem }) {
   const soloRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const ttsMemo = useRef(new Map<string, string>());
+  const clipAbortRef = useRef<AbortController | null>(null);
+  const clipContextRef = useRef<AudioContext | null>(null);
 
   // 朗读偏好本机记忆
   useEffect(() => {
@@ -53,11 +54,23 @@ export default function Reader({ poem }: { poem: Poem }) {
     return () => cancelAnimationFrame(frame);
   }, []);
   const update = useCallback((patch: Partial<NarrationSettings>) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...patch };
-      saveNarrationSettings(next);
-      return next;
-    });
+    const next = { ...settingsRef.current, ...patch };
+    settingsRef.current = next;
+    setSettings(next);
+    saveNarrationSettings(next);
+    if ('edgeVoice' in patch || 'voiceURI' in patch || 'pitch' in patch || 'rate' in patch) {
+      previewRunRef.current++;
+      narrationRunRef.current++;
+      stopRef.current = true;
+      speechDoneRef.current?.();
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      audioRef.current?.pause();
+      audioRef.current = null;
+      ambientMusic.setDuck(false);
+      if (!soloRef.current) ambientMusic.stop();
+      setPreviewing(false);
+      setSpeaking(false);
+    }
   }, []);
 
   // 沉浸体验数据（配图/译文）轮询
@@ -109,6 +122,8 @@ export default function Reader({ poem }: { poem: Poem }) {
     const narrationRun = narrationRunRef;
     const previewRun = previewRunRef;
     const urls = ttsMemo.current;
+    const clipAbort = clipAbortRef;
+    const clipContext = clipContextRef;
     return () => {
       stopRef.current = true;
       // 卸载时让仍在等待网络请求的朗读和试听失效。
@@ -118,6 +133,8 @@ export default function Reader({ poem }: { poem: Poem }) {
       if ("speechSynthesis" in window) speechSynthesis.cancel();
       audioRef.current?.pause();
       ambientMusic.stop();
+      clipAbort.current?.abort();
+      void clipContext.current?.close().catch(() => {});
       for (const url of urls.values()) URL.revokeObjectURL(url);
       urls.clear();
     };
@@ -138,6 +155,8 @@ export default function Reader({ poem }: { poem: Poem }) {
   }, [exp]);
 
   const stopAll = useCallback(() => {
+    previewRunRef.current++;
+    setPreviewing(false);
     stopRef.current = true;
     narrationRunRef.current++;
     speechDoneRef.current?.();
@@ -148,7 +167,7 @@ export default function Reader({ poem }: { poem: Poem }) {
     setSpeaking(false);
   }, []);
 
-  // —— Edge 神经语音合成（结果按 音色+音调+语速+文本 记忆，反复朗读不重复合成）——
+  // 在线配音按音色、音调、语速与文本记忆，反复朗读不重复合成。
   const synthUrl = useCallback(async (text: string, voice: string) => {
     const s = settingsRef.current;
     const pitch = Math.round((s.pitch - 1) * 60);
@@ -160,6 +179,7 @@ export default function Reader({ poem }: { poem: Poem }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, voice, pitch, rate }),
+      signal: AbortSignal.timeout(190_000),
     });
     if (!r.ok) {
       const d = (await r.json().catch(() => ({}))) as { error?: string };
@@ -170,48 +190,28 @@ export default function Reader({ poem }: { poem: Poem }) {
     return url;
   }, []);
 
-  const playEdge = useCallback(async (text: string, runId: number) => {
+  const playOnline = useCallback(async (text: string, runId: number) => {
     const url = await synthUrl(text, settingsRef.current.edgeVoice);
     if (stopRef.current || narrationRunRef.current !== runId) return;
     const audio = new Audio(url); // 语速/音调已在服务端合成
     audioRef.current = audio;
     audio.onplay = () => ambientMusic.setDuck(true);
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
       const finish = () => {
         if (speechDoneRef.current === finish) speechDoneRef.current = null;
         resolve();
       };
       speechDoneRef.current = finish;
       audio.onended = finish;
-      audio.onerror = finish;
-      audio.play().catch(finish);
+      const fail = () => {
+        if (speechDoneRef.current === finish) speechDoneRef.current = null;
+        reject(new Error("朗读音频播放失败，请重新点击播放。"));
+      };
+      audio.onerror = fail;
+      audio.play().catch(fail);
     });
     if (audioRef.current === audio) audioRef.current = null;
   }, [synthUrl]);
-
-  const speakBrowser = useCallback((text: string, runId?: number) => {
-    return new Promise<void>((resolve) => {
-      if (!("speechSynthesis" in window)) return resolve();
-      if (runId !== undefined && (stopRef.current || narrationRunRef.current !== runId)) return resolve();
-      const s = settingsRef.current;
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "zh-CN";
-      u.rate = s.rate;
-      u.pitch = s.pitch;
-      const voice = window.speechSynthesis.getVoices().find((v) => v.voiceURI === s.voiceURI);
-      if (voice) u.voice = voice;
-      u.onstart = () => ambientMusic.setDuck(true);
-      const finish = () => {
-        if (speechDoneRef.current === finish) speechDoneRef.current = null;
-        resolve();
-      };
-      speechDoneRef.current = finish;
-      u.onend = finish;
-      u.onerror = finish;
-      speechSynthesis.cancel();
-      speechSynthesis.speak(u);
-    });
-  }, []);
 
   const ensureMusic = useCallback(() => {
     const s = settingsRef.current;
@@ -222,6 +222,7 @@ export default function Reader({ poem }: { poem: Poem }) {
 
   // 完整朗读：逐幕滚动 + 逐幕发声
   const narrate = useCallback(async () => {
+    if (clipAbortRef.current) return;
     if (!exp) return;
     if (speaking) {
       stopAll();
@@ -234,8 +235,7 @@ export default function Reader({ poem }: { poem: Poem }) {
     // 先念诗名与作者，再进入诗句
     const announce = `《${poem.title}》，${poem.author}。`;
     try {
-      if (settingsRef.current.edgeVoice) await playEdge(announce, runId);
-      else await speakBrowser(announce, runId);
+      await playOnline(announce, runId);
     } catch { /* 朗读开场白失败不阻塞正文 */ }
     if (stopRef.current || narrationRunRef.current !== runId) return;
     ambientMusic.setDuck(false);
@@ -245,29 +245,27 @@ export default function Reader({ poem }: { poem: Poem }) {
       const s = scenes[i];
       setActive(i);
       sectionRefs.current[i]?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
-      const text = s.lines.join("。");
-      const useEdge = Boolean(settingsRef.current.edgeVoice);
+      const text = s.lines.join("\n");
       try {
-        if (useEdge) await playEdge(text, runId);
-        else await speakBrowser(text, runId);
+        await playOnline(text, runId);
       } catch (e) {
-        if (useEdge) {
-          flashNotice(`Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），本幕改用浏览器语音。`);
-          await speakBrowser(text, runId);
-        }
+        if (stopRef.current || narrationRunRef.current !== runId) return;
+        stopAll();
+        flashNotice(`豆包朗读失败：${e instanceof Error ? e.message : "网络异常"}。请重试，不会切换为本机声音。`);
+        return;
       }
       if (stopRef.current || narrationRunRef.current !== runId) return;
       ambientMusic.setDuck(false);
       if (!stopRef.current && i < scenes.length - 1) {
         await new Promise((r) => setTimeout(r, 600));
         if (stopRef.current || narrationRunRef.current !== runId) return;
-        if (settingsRef.current.edgeVoice) synthUrl(scenes[i + 1].lines.join("。"), settingsRef.current.edgeVoice).catch(() => void 0);
+        if (settingsRef.current.edgeVoice) synthUrl(scenes[i + 1].lines.join("\n"), settingsRef.current.edgeVoice).catch(() => void 0);
       }
     }
     if (stopRef.current || narrationRunRef.current !== runId) return;
     if (!soloRef.current) ambientMusic.stop();
     setSpeaking(false);
-  }, [exp, speaking, stopAll, ensureMusic, speakBrowser, playEdge, flashNotice, synthUrl, poem]);
+  }, [exp, speaking, stopAll, ensureMusic, playOnline, flashNotice, synthUrl, poem]);
 
   // 只听配乐：单独开关
   const toggleMusicSolo = useCallback(() => {
@@ -285,16 +283,18 @@ export default function Reader({ poem }: { poem: Poem }) {
 
   // 试听当前设置
   const preview = useCallback(async () => {
+    if (clipAbortRef.current) return;
     if (previewing) {
       previewRunRef.current++;
       speechDoneRef.current?.();
-      speechSynthesis.cancel();
+      if ("speechSynthesis" in window) speechSynthesis.cancel();
       audioRef.current?.pause();
       audioRef.current = null;
       if (!soloRef.current) ambientMusic.stop();
       setPreviewing(false);
       return;
     }
+    stopAll();
     const runId = ++previewRunRef.current;
     setPreviewing(true);
     ensureMusic();
@@ -314,28 +314,38 @@ export default function Reader({ poem }: { poem: Poem }) {
         audioRef.current = audio;
         audio.onplay = () => ambientMusic.setDuck(true);
         audio.onended = finish;
-        audio.onerror = finish;
+        audio.onerror = () => { flashNotice("试听音频播放失败，请重新点击试听。"); finish(); };
         await audio.play();
         return;
       } catch (e) {
         if (previewRunRef.current !== runId) return;
-        flashNotice(`Edge 音色暂不可用（${e instanceof Error ? e.message : "网络异常"}），试听改用浏览器语音。`);
+        flashNotice(`所选音色试听失败：${e instanceof Error ? e.message : "网络异常"}。请重试或选择其他音色。`);
+        finish();
+        return;
       }
     }
-    await speakBrowser(text);
-    if (previewRunRef.current !== runId) return;
     finish();
-  }, [previewing, ensureMusic, synthUrl, speakBrowser, flashNotice]);
+  }, [previewing, ensureMusic, synthUrl, flashNotice, stopAll]);
 
-  // 生成短片（用户点击触发）：旁白（Edge 音色）+ 意境配乐 + 分镜画面 合成 WebM，保存到影片馆
+  // 生成短片：在线诗词朗诵 + 意境配乐 + 分镜画面，沿用浏览器 WebM 合成流程。
   const makeClip = useCallback(async () => {
-    if (!exp || clipBusy) return;
+    if (!exp || clipBusy || clipAbortRef.current) return;
     if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) {
       flashNotice("当前浏览器不支持视频录制，请使用 Chrome / Edge。");
       return;
     }
     setClipBusy(true);
+    const controller = new AbortController();
+    clipAbortRef.current = controller;
+    let recordingContext: AudioContext | null = null;
     try {
+      stopAll();
+      previewRunRef.current++;
+      setPreviewing(false);
+      recordingContext = new AudioContext();
+      clipContextRef.current = recordingContext;
+      await recordingContext.resume();
+      controller.signal.throwIfAborted();
       const poemContext = poem.lines.join(" ");
       const images = exp.scenes.map((scene) => {
         const generated = exp.images[scene.index];
@@ -345,77 +355,58 @@ export default function Reader({ poem }: { poem: Poem }) {
           ? environmentById(selected).image
           : matchSceneEnvironment(scene.text, poem.title, poem.tags, poemContext).image;
       });
-      // 1) 逐幕合成旁白（未选音色时默认「晓晓」温柔女声）
-      const voice = settingsRef.current.edgeVoice || "zh-CN-XiaoxiaoNeural";
-      const pitch = Math.round((settingsRef.current.pitch - 1) * 60);
-      const rate = settingsRef.current.rate;
-      const narrations: { sceneIndex: number; mp3: ArrayBuffer }[] = [];
-      let ttsOk = true;
-      let ttsError = '';
-      // 片头旁白：诗名与作者
-      setClipStage("合成片头旁白…");
-      try {
-        const r = await fetch("/api/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: `《${exp.poem.title}》，${exp.poem.author}。`, voice, pitch, rate }),
-        });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '旁白合成失败。');
-        narrations.push({ sceneIndex: -1, mp3: await r.arrayBuffer() });
-      } catch (e) {
-        ttsOk = false;
-        ttsError = e instanceof Error ? e.message : '旁白合成失败。';
-      }
-      for (let i = 0; i < exp.scenes.length; i++) {
-        setClipStage(`合成旁白 ${i + 1}/${exp.scenes.length}…`);
-        try {
-          const r = await fetch("/api/tts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: exp.scenes[i].lines.join("。"), voice, pitch, rate }),
-          });
-          if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || '旁白合成失败。');
-          narrations.push({ sceneIndex: i, mp3: await r.arrayBuffer() });
-        } catch (e) {
-          ttsOk = false; // 单幕失败：该幕静音，继续生成
-          ttsError = e instanceof Error ? e.message : '旁白合成失败。';
-        }
-      }
-      if (!ttsOk) flashNotice(`${ttsError} 部分旁白合成失败，对应幕将只有配乐。`);
 
-      // 2) 启动意境配乐（其实时流将作为一条音轨混入）
+      // 2) 启动意境配乐，随后接入与诗词朗诵共用的混音总线
       const s = settingsRef.current;
       let musicStream: MediaStream | null = null;
       if (s.music) {
         ambientMusic.setVolume(Math.min(0.6, s.musicVolume + 0.1));
-        await ambientMusic.start(musicMood());
+        await ambientMusic.start(musicMood(), false);
+        controller.signal.throwIfAborted();
         musicStream = ambientMusic.getCaptureStream();
       }
 
-      // 3) 录制合成（旁白走独立录制总线，成片必有音轨）
-      setClipStage("录制画面与混音…");
+      // 配音请求与全部画面加载同时进行，准备完成再同步录制。
       const { blob, total } = await generatePoemClip({
         exp,
         musicStream,
-        narrations,
-        images,
+        narrations: synthesizeClipNarrations(exp.scenes, settingsRef.current, controller.signal, setClipStage),
+        images: showIllustrations && exp.mode === 'ai'
+          ? waitForClipImages(exp, controller.signal, setClipStage)
+          : images,
+        audioContext: recordingContext,
+        signal: controller.signal,
+        onRecording: () => setClipStage("正在同步录制画面与配音，完成后播放…"),
       });
       ambientMusic.stop();
+      controller.signal.throwIfAborted();
 
       // 4) 保存到影片馆并跳转
       setClipStage("保存到影片馆…");
       const qs = new URLSearchParams({ title: exp.poem.title, author: exp.poem.author, duration: total.toFixed(1) });
-      const up = await adminFetch(`/api/videos?${qs}`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: blob });
+      const up = await adminFetch(`/api/videos?${qs}`, { method: "POST", headers: { "Content-Type": "video/webm" }, body: blob, signal: controller.signal });
       if (!up.ok) throw new Error((await up.json().catch(() => ({}))).error ?? "保存失败");
-      router.push("/video");
+      controller.signal.throwIfAborted();
+      const saved = (await up.json()).data;
+      router.push(`/video?play=${encodeURIComponent(saved.id)}`);
     } catch (e) {
-      ambientMusic.stop();
-      flashNotice(e instanceof Error ? e.message : "短片生成失败。");
+      if (!controller.signal.aborted) {
+        controller.abort();
+        ambientMusic.stop();
+        flashNotice(e instanceof Error ? e.message : "短片生成失败。");
+      }
     } finally {
-      setClipBusy(false);
-      setClipStage(null);
+      if (recordingContext && recordingContext.state !== "closed") await recordingContext.close().catch(() => {});
+      if (clipAbortRef.current === controller) {
+        clipAbortRef.current = null;
+        clipContextRef.current = null;
+      }
+      if (clipAbortRef.current === null) {
+        setClipBusy(false);
+        setClipStage(null);
+      }
     }
-  }, [exp, clipBusy, musicMood, flashNotice, router, poem, sceneOverrides, showIllustrations]);
+  }, [exp, clipBusy, musicMood, flashNotice, router, poem, sceneOverrides, showIllustrations, stopAll]);
 
   const scenes = exp?.scenes ?? [];
   const poemContext = poem.lines.join(" ");
@@ -464,14 +455,14 @@ export default function Reader({ poem }: { poem: Poem }) {
         </span>
         <span className="reader-actions">
           {exp && exp.scenes.length > 0 && (
-            <button className="ghost-btn" onClick={() => void makeClip()} disabled={clipBusy} title="用当前画面、旁白与配乐合成短片">
+            <button className="ghost-btn" onClick={() => void makeClip()} disabled={clipBusy} title="用当前画面、诗词朗诵与配乐合成短片">
               {clipBusy ? clipStage ?? "● 合成中…" : "🎬 生成短片"}
             </button>
           )}
-          <button className={`ghost-btn${showSettings ? " speaking" : ""}`} onClick={() => setShowSettings((v) => !v)}>
+          <button className={`ghost-btn${showSettings ? " speaking" : ""}`} disabled={clipBusy} onClick={() => setShowSettings((v) => !v)}>
             ♪ 朗读设置
           </button>
-          <button className={`ghost-btn${speaking ? " speaking" : ""}`} onClick={() => void narrate()}>
+          <button className={`ghost-btn${speaking ? " speaking" : ""}`} disabled={clipBusy} onClick={() => void narrate()}>
             {speaking ? "■ 停止朗读" : "▶ 聆听全诗"}
           </button>
         </span>
@@ -483,41 +474,15 @@ export default function Reader({ poem }: { poem: Poem }) {
           <div className="set-row">
             <label>朗读音色</label>
             <select aria-label="朗读音色" value={settings.edgeVoice} onChange={(e) => update({ edgeVoice: e.target.value })}>
-              <optgroup label="Edge 在线神经语音（自然流畅 · 需联网）">
-                {EDGE_VOICES.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}（{v.gender}声 · {v.style}）
-                  </option>
-                ))}
-              </optgroup>
-              <optgroup label="本机">
-                <option value="">浏览器语音（系统自带 · 离线兜底）</option>
+              <optgroup label="豆包大模型配音">
+                {DOUBAO_VOICES.map(v => <option key={v.id} value={v.id}>{v.name}（{v.gender}声 · {v.style}）</option>)}
               </optgroup>
             </select>
           </div>
           <p className="set-note" style={{ marginTop: -6 }}>
-            Edge 神经语音免费无需配置，男女音色随意切换，语速与音调即时生效；网络异常时自动回退浏览器语音。
+            全诗朗读、试听和短片统一使用豆包，支持男女音色、语速与音调；服务异常时会提示重试。
           </p>
 
-          {!settings.edgeVoice && (
-            <>
-              <div className="set-row">
-                <label>系统声音</label>
-                <select aria-label="系统声音" value={settings.voiceURI} onChange={(e) => update({ voiceURI: e.target.value })}>
-                  <option value="">系统默认{voices.length ? `（共 ${voices.length} 个中文语音）` : ""}</option>
-                  {voices.map((v) => (
-                    <option key={v.voiceURI} value={v.voiceURI}>
-                      {v.name}（{v.lang}{v.localService ? " · 本机" : " · 在线"}）
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <p className="set-note" style={{ marginTop: -6 }}>
-                可选声音来自本机与浏览器内置语音：Windows 设置 → 时间和语言 → 语音 中安装的中文语音包越多，可选项越多；
-                用 Edge 浏览器打开还能使用「晓晓」等自然在线语音。
-              </p>
-            </>
-          )}
           <div className="set-row">
             <label>风格</label>
             <span className="preset-chips">
@@ -543,7 +508,7 @@ export default function Reader({ poem }: { poem: Poem }) {
           <div className="set-row">
             <label>音调 {settings.pitch.toFixed(2)}</label>
             <input
-              type="range" min={0.8} max={1.15} step={0.05}
+              type="range" min={0.7} max={1.3} step={0.05}
               aria-label="音调" value={settings.pitch}
               onChange={(e) => update({ pitch: Number(e.target.value) })}
             />
@@ -592,7 +557,7 @@ export default function Reader({ poem }: { poem: Poem }) {
           </div>
           <p className="set-note">
             背景音乐为实时生成的古琴风环境音，随诗的情绪自动变化；朗读时只会温和压低，不会盖住人声。
-            Edge 音色的语速/音调在合成时生效，结果会缓存，重复朗读不重复合成。
+            在线音色的语速与音调在合成时生效，结果会缓存，重复朗读不重复合成。
           </p>
           <button className="pop-close" onClick={() => setShowSettings(false)} aria-label="关闭">
             ×
@@ -732,13 +697,16 @@ export default function Reader({ poem }: { poem: Poem }) {
                   ))}
                 </div>
               )}
-              {s.translation && (
-                <div className="scene-trans">
-                  <div className="label">白话意译</div>
-                  <p>{s.translation}</p>
-                  {s.note && <p className="jian">{s.note}</p>}
-                </div>
-              )}
+              <div className="scene-trans">
+                {s.translation || s.note ? <>
+                  <div className="label">{s.translation ? "白话意译" : "诗句注释"}</div>
+                  {s.translation && <p>{s.translation}</p>}
+                  {s.note && <p className="jian">注释 · {s.note}</p>}
+                </> : <>
+                  <div className="label">译文与注释</div>
+                  <p role="status">{exp?.analysisStatus === "pending" ? "正在整理本句译注，请稍候…" : exp?.analysisStatus === "unconfigured" ? "本站尚未启用译注服务，暂时无法提供本句解释。" : exp?.analysisStatus === "failed" ? "译注暂时载入失败，请稍后刷新重试。" : "本句暂无可靠译注。"}</p>
+                </>}
+              </div>
             </div>
           </section>
         ))}
